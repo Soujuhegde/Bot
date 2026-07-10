@@ -150,7 +150,7 @@ def parse_intent(state: ConversationState):
             fr = state.get("flight_result") or {}
             for f in fr.get("results", []):
                 if airline_flight in f.get("airline_name", "") or airline_flight in f.get("flight_numbers", "") or f.get("flight_numbers") in airline_flight:
-                    selected_flight["booking_link"] = f.get("booking_link", "https://flights.google.com")
+                    selected_flight["booking_link"] = f.get("booking_link") or "https://flights.google.com"
                     selected_flight["flight_numbers"] = f.get("flight_numbers", "N/A")
                     selected_flight["departure_time"] = f.get("departure_time", "00:00")
                     selected_flight["arrival_time"] = f.get("arrival_time", "00:00")
@@ -183,10 +183,10 @@ def parse_intent(state: ConversationState):
             step = "verify_passenger_count"
             
     if step != "verify_passenger_count" and result.intent == "select_flight":
-        if result.selected_airline: selected_flight["airline"] = result.selected_airline
-        if result.selected_class: selected_flight["class"] = result.selected_class
-        if result.selected_price: selected_flight["price"] = result.selected_price
-        if hasattr(result, "booking_link") and result.booking_link: selected_flight["booking_link"] = result.booking_link
+        if result.selected_airline and not user_msg_text.startswith("I would like to select "): selected_flight["airline"] = result.selected_airline
+        if result.selected_class and not user_msg_text.startswith("I would like to select "): selected_flight["class"] = result.selected_class
+        if result.selected_price and not user_msg_text.startswith("I would like to select "): selected_flight["price"] = result.selected_price
+        if hasattr(result, "booking_link") and result.booking_link and not user_msg_text.startswith("I would like to select "): selected_flight["booking_link"] = result.booking_link
         
         step = "awaiting_passenger_count"
             
@@ -321,8 +321,16 @@ def ask_clarification(state: ConversationState):
         
     elif step == "awaiting_payment":
         flight = state.get("selected_flight", {})
-        # Use the dynamic booking_link provided by the flight agent, which contains the specific search URL for that flight
-        link = flight.get("booking_link", "https://flights.google.com")
+        origin = state.get("flight_params", {}).get("origin", "")
+        destination = state.get("flight_params", {}).get("destination", "")
+        
+        base_link = flight.get("booking_link") or "https://flights.google.com"
+        # Append origin and destination to the specific airline link
+        if "?" in base_link:
+            link = f"{base_link}&origin={origin}&destination={destination}"
+        else:
+            link = f"{base_link}?origin={origin}&destination={destination}"
+            
         msg = "Perfect! Let's proceed with your booking."
         replies = ["Payment done"]
         options = [{"type": "action_button", "label": "Proceed With Booking", "url": link}]

@@ -119,7 +119,7 @@ const MessageBubble = ({ message, onQuickReply, onOptionSelect }) => {
                 return (
                   <div key={i} className="flex">
                     <a 
-                      href={opt.url} 
+                      href={opt.url || 'https://flights.google.com'} 
                       target="_blank" 
                       rel="noopener noreferrer" 
                       className="inline-block w-fit text-center bg-brand text-white font-bold py-3 px-6 rounded-xl shadow hover:opacity-90 transition-opacity"
