@@ -51,7 +51,7 @@ class ExtractedInfo(BaseModel):
     infants_count: int | None = None
 
 try:
-    llm = ChatGroq(model="mixtral-8x7b-32768", temperature=0)
+    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
 except Exception as e:
     print(f"Warning: Failed to initialize ChatGroq. {e}")
     llm = None
