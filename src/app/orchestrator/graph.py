@@ -176,16 +176,24 @@ def parse_intent(state: ConversationState):
             print(f"JSON parsing fallback also failed: {ex}. Using empty ExtractedInfo.")
             result = ExtractedInfo(intent="general_qa")
     
-    if result.origin: flight_params["origin"] = result.origin
-    if result.destination: flight_params["destination"] = result.destination
-    if result.limit: flight_params["limit"] = result.limit
+    step = state.get("current_step", "start")
     
-    if result.hotel_city: hotel_params["city"] = result.hotel_city
-    if result.check_in_date: hotel_params["check_in_date"] = result.check_in_date
-    if result.check_out_date: hotel_params["check_out_date"] = result.check_out_date
+    if result.origin and (not flight_params.get("origin") or step == "awaiting_origin_dest"): 
+        flight_params["origin"] = result.origin
+    if result.destination and (not flight_params.get("destination") or step == "awaiting_origin_dest"): 
+        flight_params["destination"] = result.destination
+    if result.limit: 
+        flight_params["limit"] = result.limit
+    
+    if result.hotel_city and (not hotel_params.get("city") or step == "hotel_awaiting_city"): 
+        hotel_params["city"] = result.hotel_city
+    if result.check_in_date and (not hotel_params.get("check_in_date") or step == "hotel_awaiting_check_in"): 
+        hotel_params["check_in_date"] = result.check_in_date
+    if result.check_out_date and (not hotel_params.get("check_out_date") or step == "hotel_awaiting_check_out"): 
+        hotel_params["check_out_date"] = result.check_out_date
     
     invalid_date = False
-    if result.departure_date:
+    if result.departure_date and (not flight_params.get("departure_date") or step == "awaiting_departure_date"):
         try:
             date_obj = datetime.strptime(result.departure_date, "%Y-%m-%d").date()
             if date_obj < datetime.now().date():
@@ -196,13 +204,22 @@ def parse_intent(state: ConversationState):
         except ValueError:
             flight_params["departure_date"] = result.departure_date
 
-    if result.journey_type: flight_params["journey_type"] = result.journey_type
+    if result.journey_type and (not flight_params.get("journey_type") or step == "awaiting_journey_type"): 
+        flight_params["journey_type"] = result.journey_type
     
     step = state.get("current_step", "start")
+    incoming_step = step
     
     # Manual override for flight/hotel selection from UI clicks to guarantee accuracy
-    
-    if user_msg_text.startswith("I would like to select hotel "):
+    if any(w in msg_text_lower for w in ["plan an itinerary", "plan itinerary", "itinerary plan", "itinerary"]):
+        pending_clarification = None
+        days_match = re.search(r"\b(\d+)\s*day", msg_text_lower)
+        if days_match:
+            hotel_params["itinerary_days"] = int(days_match.group(1))
+            step = "plan_itinerary"
+        else:
+            step = "itinerary_awaiting_days"
+    elif user_msg_text.startswith("I would like to select hotel "):
         result.intent = "select_hotel"
         try:
             parts = user_msg_text.replace("I would like to select hotel ", "").split(" for ")
@@ -268,7 +285,18 @@ def parse_intent(state: ConversationState):
             # Prevent hallucinated flight selection
             step = "verify_passenger_count"
             
-    if step != "verify_passenger_count" and result.intent == "select_flight":
+    if step == "plan_itinerary" or step == "itinerary_awaiting_days":
+        if step == "itinerary_awaiting_days" and incoming_step == "itinerary_awaiting_days":
+            days_match = re.search(r"\b(\d+)\b", user_msg_text)
+            if days_match:
+                hotel_params["itinerary_days"] = int(days_match.group(1))
+                step = "plan_itinerary"
+                pending_clarification = None
+            else:
+                pending_clarification = "⚠️ Validation Error:\n- Please enter a valid number of days (e.g. 3 or '5 days')."
+        else:
+            pass
+    elif step != "verify_passenger_count" and result.intent == "select_flight":
         if result.selected_airline and not user_msg_text.startswith("I would like to select "): selected_flight["airline"] = result.selected_airline
         if result.selected_class and not user_msg_text.startswith("I would like to select "): selected_flight["class"] = result.selected_class
         if result.selected_price and not user_msg_text.startswith("I would like to select "): selected_flight["price"] = result.selected_price
@@ -512,13 +540,23 @@ def parse_intent(state: ConversationState):
             elif "arrival_time" not in selected_hotel: step = "hotel_awaiting_arrival_time"
             else: step = "hotel_summary"
             
-    elif result.intent == "book_hotel" or user_msg_text.strip().lower() == "book a hotel" or "hotel" in msg_text_lower:
+    # Check if we are in an active booking details-gathering step
+    is_gathering_details = step in [
+        "awaiting_origin_dest", "awaiting_departure_date", "awaiting_journey_type",
+        "awaiting_passenger_count", "awaiting_passenger_details", "verify_passenger_count",
+        "awaiting_payment", "hotel_confirm_city", "hotel_confirm_dates"
+    ] or step.startswith("hotel_awaiting_")
+
+    if result.intent == "general_qa" and not is_gathering_details:
+        step = "general_qa"
+        
+    elif (result.intent == "book_hotel" or user_msg_text.strip().lower() == "book a hotel" or "hotel" in msg_text_lower) and not is_gathering_details:
         if flight_params.get("destination") or selected_flight.get("airline_name"):
             step = "hotel_confirm_city"
         else:
             step = "hotel_awaiting_city"
             
-    elif result.intent == "book_flight" or flight_params.get("origin"):
+    elif (result.intent == "book_flight" or flight_params.get("origin")) and not is_gathering_details:
         if not flight_params.get("origin") or not flight_params.get("destination"):
             step = "awaiting_origin_dest"
         elif invalid_date:
@@ -573,15 +611,13 @@ def ask_clarification(state: ConversationState):
     # If the user goes off-topic or says something conversational/harsh, handle it dynamically
     if step == "general_qa":
         if llm:
-            qa_prompt = f"""You are a specialized travel assistant chatbot designed exclusively to handle travel-related queries. Your core functions include flight booking, hotel booking, itinerary planning, and other travel arrangements. You must strictly adhere to the following guidelines:
+            qa_prompt = f"""You are a specialized travel assistant chatbot designed to handle travel-related queries.
+You should assist the user with any question related to travel, destinations, weather, sightseeing, culture, local food, transportation, hotels, flights, and itineraries.
 
-Scope Limitation: Only respond to questions directly related to travel services (e.g., flight bookings, hotel reservations, travel itineraries, destination information, travel tips).
-
-Out-of-Scope Handling: If a user asks a question unrelated to travel (e.g., general knowledge, personal advice, off-topic or inappropriate content), do not answer it. Instead, respond exactly with: "I'm sorry, but I can only assist with travel-related queries such as flight bookings, hotel reservations, and itinerary planning. Please ask a travel-related question."
-
-Polite Redirection: Maintain a helpful and courteous tone when declining out-of-scope questions. Do not engage in or acknowledge irrelevant or inappropriate content.
-No Speculation: Do not attempt to guess or provide information outside your defined travel scope.
-Consistency: Apply these rules uniformly to all user interactions.
+Guidelines:
+1. Destination Information: If the user asks about a city/place (e.g., "How is Mumbai?", "how is the weather in mumbai", "best time to visit", "what to eat"), this is fully in-scope.
+2. Conciseness: Keep your response extremely brief, short, and focused. Limit your response strictly to a maximum of 2 sentences (or 2 lines). Do not write essays, bulleted lists, or excessive details.
+3. Out-of-Scope: Only decline questions that are completely unrelated to travel or destinations (e.g., coding, math, general science, personal advice). If and only if the question is completely unrelated to travel, respond exactly with: "I'm sorry, but I can only assist with travel-related queries such as flight bookings, hotel reservations, and itinerary planning. Please ask a travel-related question."
 """
             msgs = [SystemMessage(content=qa_prompt)] + state["messages"][-2:]
             try:
@@ -806,6 +842,65 @@ Consistency: Apply these rules uniformly to all user interactions.
             msg = "Perfect! Let's proceed with your booking."
             replies = ["Payment done"]
             options = [{"type": "action_button", "label": "Proceed With Booking", "url": link}]
+    elif step == "itinerary_awaiting_days":
+        flight = state.get("selected_flight") or {}
+        hotel = state.get("selected_hotel") or {}
+        fp = state.get("flight_params") or {}
+        hp = state.get("hotel_params") or {}
+        check_in = hp.get("check_in_date") or fp.get("departure_date")
+        check_out = hp.get("check_out_date")
+        days = 0
+        if check_in and check_out:
+            try:
+                d1 = datetime.strptime(check_in, "%Y-%m-%d")
+                d2 = datetime.strptime(check_out, "%Y-%m-%d")
+                days = (d2 - d1).days
+            except:
+                pass
+                
+        clarification = state.get("pending_clarification")
+        prefix = f"{clarification}\n\n" if clarification else ""
+        
+        msg = f"{prefix}Great! I can plan a customized travel itinerary for you. How many days would you like me to plan the itinerary for?"
+        
+        replies = ["3 Days", "5 Days", "7 Days"]
+        if days > 0 and str(days) not in ["3", "5", "7"]:
+            replies.append(f"{days} Days")
+            
+        return {"final_response": msg, "quick_replies": replies, "options_to_show": []}
+
+    elif step == "plan_itinerary":
+        flight = state.get("selected_flight") or {}
+        hotel = state.get("selected_hotel") or {}
+        fp = state.get("flight_params") or {}
+        hp = state.get("hotel_params") or {}
+        
+        city = hp.get("city") or fp.get("destination") or "your destination"
+        itinerary_days = hp.get("itinerary_days", 3)
+        check_in = hp.get("check_in_date") or fp.get("departure_date") or "today"
+        
+        itinerary_prompt = f"""You are an expert travel planner. Create a highly customized, beautiful, and engaging travel itinerary for a trip to {city}.
+        
+        Trip Details:
+        - Destination City: {city}
+        - Duration: {itinerary_days} Days (starting {check_in})
+        - Hotel Stay: {hotel.get('name', 'N/A')}
+        - Flight details: {flight.get('airline_name', 'N/A')} flight {flight.get('flight_numbers', 'N/A')}
+        - Guests / Occupancy: {hp.get('guests', '1 Adult')}
+        
+        Create a detailed, beautiful day-by-day travel itinerary strictly for {itinerary_days} days. 
+        Structure your response beautifully using markdown:
+        - Use clean headings (e.g. ### Day 1: [Theme])
+        - Bullet points for activities
+        - Highlight popular sights, dining recommendations, and travel tips
+        - Use emojis to make it lively and modern.
+        Keep the response engaging but concise enough to fit comfortably in a chat message."""
+        
+        response = llm.invoke([SystemMessage(content=itinerary_prompt)])
+        msg = response.content
+        
+        replies = ["Book a Flight", "Book a Hotel"]
+        return {"final_response": msg, "quick_replies": replies, "options_to_show": []}
         
     elif step == "booking_confirmed":
         flight = state.get("selected_flight", {})
