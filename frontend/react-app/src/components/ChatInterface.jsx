@@ -90,7 +90,7 @@ const ChatInterface = () => {
             message={msg} 
             onQuickReply={sendMessage} 
             onOptionSelect={(option, flightClass, price) => {
-              sendMessage(`I would like to select ${flightClass} class on ${option.airline_name} ${option.flight_numbers} for ${price}. URL: ${option.booking_link}`);
+              sendMessage(`I would like to select ${flightClass} class on ${option.airline_name} ${option.flight_numbers} for ${price}`);
             }}
           />
         ))}

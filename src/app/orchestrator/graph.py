@@ -40,9 +40,9 @@ class ExtractedInfo(BaseModel):
     journey_type: Literal["One Way", "Round Trip"] | None = None
     selected_class: str | None = None
     selected_airline: str | None = None
-    selected_price: Optional[str] = Field(description="The price of the flight")
-    booking_link: Optional[str] = Field(description="The booking URL link if provided in the message")
-    passenger_name: Optional[str] = Field(description="Name of the passenger")
+    selected_price: Optional[str] = Field(description="The price of the flight", default=None)
+    booking_link: Optional[str] = Field(description="The booking URL link if provided in the message", default=None)
+    passenger_name: Optional[str] = Field(description="Name of the passenger", default=None)
     passenger_email: str | None = None
     passenger_contact: str | None = None
     passenger_passport: str | None = None
@@ -93,13 +93,13 @@ def parse_intent(state: ConversationState):
     - provide_passenger_count: user tells you how many adults/children/infants. Extract this into adults_count, children_count, infants_count.
     - provide_details: user provides their passenger info (name, email, contact, passport).
     - payment_done: user says payment is done.
-    - confirm: user confirms something (e.g., says "Yes").
-    - reject: user rejects something (e.g., says "No").
+    - confirm: user explicitly says yes/correct.
+    - reject: user explicitly says no/wrong.
     - general_qa: anything else.
     
-    Extract the information as structured data. If they just say hi, intent is general_qa.
-    CRITICAL: 
-    - Convert all dates strictly to YYYY-MM-DD format.
+    Rules for Date Extraction:
+    - ALWAYS convert departure_date strictly to YYYY-MM-DD format.
+    - If the user says "next [day]" (e.g., "next monday"), use the exact date for that day from the "Upcoming 7 days reference". Do NOT add an extra week.
     - Convert all origin and destination cities/countries/airports strictly to their most prominent 3-letter IATA airport code.
       - If a country is provided (e.g., 'India', 'France'), output its major international airport code (e.g., 'DEL' for India, 'CDG' for France).
       - If a city has multiple airports, output the primary airport code (e.g., 'LHR' for London, 'JFK' for New York) or the city code.
