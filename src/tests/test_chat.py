@@ -20,7 +20,7 @@ def clean_sessions():
             pass
 
 from unittest.mock import patch, AsyncMock, MagicMock
-from app.orchestrator.graph import ExtractedInfo
+from app.orchestrator.nlu_parser import ExtractedInfo
 
 class MockLLMHelper:
     def __init__(self):
@@ -30,9 +30,14 @@ class MockLLMHelper:
 @pytest.fixture
 def mock_llm():
     helper = MockLLMHelper()
-    with patch('app.orchestrator.graph.llm') as mock:
+    with patch('app.orchestrator.nlu_parser.llm') as mock_nlu, \
+         patch('app.orchestrator.graph.llm') as mock_graph, \
+         patch('app.orchestrator.itinerary_flow.llm') as mock_itinerary:
+         
         mock_structured = MagicMock()
-        mock.with_structured_output.return_value = mock_structured
+        mock_nlu.with_structured_output.return_value = mock_structured
+        mock_graph.with_structured_output.return_value = mock_structured
+        mock_itinerary.with_structured_output.return_value = mock_structured
         
         def mock_invoke(messages):
             intent_val = helper.parse_intent()
@@ -51,7 +56,10 @@ def mock_llm():
         def mock_general_invoke(messages):
             mock_content.content = helper.generate_response()
             return mock_content
-        mock.invoke = mock_general_invoke
+            
+        mock_nlu.invoke = mock_general_invoke
+        mock_graph.invoke = mock_general_invoke
+        mock_itinerary.invoke = mock_general_invoke
         
         yield helper
 
@@ -59,8 +67,8 @@ from app.schemas.chat import TaskResponse
 
 @pytest.fixture
 def mock_serp():
-    with patch('app.orchestrator.graph.call_flight_agent') as mock_flight, \
-         patch('app.orchestrator.graph.call_hotel_agent') as mock_hotel:
+    with patch('app.orchestrator.flight_flow.call_flight_agent') as mock_flight, \
+         patch('app.orchestrator.hotel_flow.call_hotel_agent') as mock_hotel:
         
         class SerpHelper:
             def __init__(self):
@@ -190,7 +198,7 @@ def test_conversational_selection_and_interruption(mock_llm, mock_serp):
     # It should have answered the question AND repeated the prompt
     assert data["clarification_needed"] is True
     assert "The weather in Delhi is currently sunny and warm." in data["message"]
-    assert "Where are you flying from and to?" in data["message"]
+    assert "where you are flying from and to" in data["followup_message"].lower()
 
     # 3. Second Interruption turn: User asks about local food
     mock_llm.parse_intent.return_value = ExtractedIntent(
@@ -204,8 +212,7 @@ def test_conversational_selection_and_interruption(mock_llm, mock_serp):
     # It should have answered the question AND repeated the prompt
     assert data["clarification_needed"] is True
     assert "You should try Butter Chicken and Chole Bhature." in data["message"]
-    assert "Where are you flying from and to?" in data["message"]
-    assert "Could you please answer this to proceed with your booking?" in data["message"]
+    assert "where you are flying from and to" in data["followup_message"].lower()
 
     # 4. User provides parameters: "From LAX on 2026-10-10"
     mock_llm.parse_intent.return_value = ExtractedIntent(
@@ -252,7 +259,7 @@ def test_conversational_selection_and_interruption(mock_llm, mock_serp):
     data = response.json()
     assert data["clarification_needed"] is False
     assert "The expensive flight is Expensive Airlines flight EX999 for INR 999.00." in data["message"]
-    assert "Would you like to proceed with this flight" in data["message"]
+    assert "Would you like to proceed with this flight" in data["followup_message"]
     assert len(data["options"]) == 1
     
     # 5. User says "choose the expensive one"
