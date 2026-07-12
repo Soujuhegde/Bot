@@ -26,3 +26,6 @@ class ChatResponse(BaseModel):
     clarification_needed: bool = False
     quick_replies: List[str] = Field(default_factory=list)
     ticket: Optional[dict] = None
+    followup_message: Optional[str] = None
+    followup_quick_replies: List[str] = Field(default_factory=list)
+    current_flow: Optional[str] = None

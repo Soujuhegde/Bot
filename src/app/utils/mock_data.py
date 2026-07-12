@@ -77,6 +77,8 @@ def mock_search_hotels(params: Dict[str, Any]) -> Dict[str, Any]:
         {"name": "The Oberoi, {city}", "star_rating": 5, "price": 22000, "booking_url": "https://www.oberoihotels.com"},
     ]
     
+    room_type = params.get("room_type", "No Preference").lower()
+    
     # Parse budget min/max
     min_p, max_p = 0, 1000000
     if budget and budget != "I'll decide later":
@@ -90,11 +92,18 @@ def mock_search_hotels(params: Dict[str, Any]) -> Dict[str, Any]:
     filtered = []
     for h in all_hotels:
         if min_p <= h["price"] <= max_p:
-            # If star category was selected, optionally match it
+            # Match Star Category
             if "3-Star" in category and h["star_rating"] != 3: continue
             if "4-Star" in category and h["star_rating"] != 4: continue
             if "5-Star" in category and h["star_rating"] != 5: continue
+
+            # Match Room Type
+            if "standard" in room_type and h["star_rating"] != 3: continue
+            if "deluxe" in room_type and h["star_rating"] != 4: continue
+            if ("luxury" in room_type or "suite" in room_type) and h["star_rating"] != 5: continue
+            
             filtered.append(h)
+
             
     # Fallback if filter too strict
     if len(filtered) < 3:

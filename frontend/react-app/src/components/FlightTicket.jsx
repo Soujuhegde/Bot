@@ -2,19 +2,14 @@ import React from 'react';
 import { Download } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
-const FlightTicket = ({ ticket }) => {
-  if (!ticket) return null;
-
+// Single boarding pass for one passenger
+const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => {
   const ticketRef = React.useRef(null);
-  const primaryPassenger = ticket.passengers && ticket.passengers.length > 0 ? ticket.passengers[0].name?.toUpperCase() || 'PASSENGER' : 'PASSENGER';
-
-  // Format date if needed, or use as is
   const displayDate = ticket.date.toUpperCase();
 
   const handleDownload = async () => {
     if (!ticketRef.current) return;
     try {
-      // Temporarily hide the download button so it doesn't show up in the captured image
       const btn = ticketRef.current.querySelector('.download-btn');
       if (btn) btn.style.display = 'none';
 
@@ -22,14 +17,14 @@ const FlightTicket = ({ ticket }) => {
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#4a81e3',
-        scale: 2, // Capture in higher resolution
+        scale: 2,
       });
 
       if (btn) btn.style.display = 'flex';
 
       const dataUrl = canvas.toDataURL('image/png');
       const link = document.createElement('a');
-      link.download = `boarding_pass_${ticket.pnr || 'ticket'}.png`;
+      link.download = `boarding_pass_${ticket.pnr || 'ticket'}_pax${passengerIndex + 1}.png`;
       link.href = dataUrl;
       link.click();
     } catch (err) {
@@ -38,18 +33,18 @@ const FlightTicket = ({ ticket }) => {
   };
 
   return (
-    <div ref={ticketRef} className="w-full max-w-4xl mx-auto my-6 flex flex-col md:flex-row font-sans rounded-2xl overflow-hidden shadow-2xl bg-[#4a81e3] p-2 relative">
+    <div ref={ticketRef} className="w-full max-w-4xl mx-auto my-4 flex flex-col md:flex-row font-sans rounded-2xl overflow-hidden shadow-2xl bg-[#4a81e3] p-2 relative">
       
       {/* Download Icon Button */}
       <button 
         onClick={handleDownload} 
         className="download-btn absolute top-5 right-5 bg-white/10 hover:bg-white/20 text-white p-2.5 rounded-full transition-colors z-20 flex items-center justify-center shadow-md border border-white/10"
-        title="Download Boarding Pass"
+        title={`Download Boarding Pass - ${passengerName}`}
       >
         <Download className="w-5 h-5 text-white" />
       </button>
 
-      {/* Left Section (White Card inside Blue) */}
+      {/* Left Section (White Card) */}
       <div className="flex-1 bg-white rounded-xl p-6 md:p-8 relative flex flex-col">
 
         {/* Top Header */}
@@ -108,7 +103,7 @@ const FlightTicket = ({ ticket }) => {
           <div className="grid grid-cols-4 gap-y-4 gap-x-8 w-full">
             <div className="col-span-2">
               <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Passenger</p>
-              <p className="font-bold text-gray-800 text-sm whitespace-nowrap">{primaryPassenger}</p>
+              <p className="font-bold text-gray-800 text-sm whitespace-nowrap">{passengerName}</p>
             </div>
             <div className="col-span-2">
               <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Date</p>
@@ -128,12 +123,11 @@ const FlightTicket = ({ ticket }) => {
             </div>
             <div>
               <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-1">Seat</p>
-              <p className="font-bold text-gray-800 text-sm">{ticket.seat}</p>
+              <p className="font-bold text-gray-800 text-sm">{seat}</p>
             </div>
           </div>
 
           <div className="ml-4 flex-shrink-0">
-            {/* Mock QR Code representation */}
             <div className="w-20 h-20 bg-white p-1 rounded grid grid-cols-4 grid-rows-4 gap-0.5">
               {[...Array(16)].map((_, i) => (
                 <div key={i} className={`bg-gray-800 ${Math.random() > 0.3 ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -171,7 +165,7 @@ const FlightTicket = ({ ticket }) => {
         <div className="grid grid-cols-2 gap-y-5 gap-x-2 text-sm w-full">
           <div className="col-span-2">
             <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Passenger Name</p>
-            <p className="font-semibold">{primaryPassenger}</p>
+            <p className="font-semibold">{passengerName}</p>
           </div>
           <div className="col-span-2 flex justify-between">
             <div>
@@ -211,11 +205,58 @@ const FlightTicket = ({ ticket }) => {
           </div>
           <div className="flex-1 border border-white/40 rounded-lg p-2 text-center bg-white/10">
             <p className="text-[9px] text-white/60 uppercase tracking-widest mb-1">Seat</p>
-            <p className="text-xl font-bold">{ticket.seat}</p>
+            <p className="text-xl font-bold">{seat}</p>
           </div>
         </div>
       </div>
 
+    </div>
+  );
+};
+
+// Generate unique seats for all passengers
+const generateSeats = (count) => {
+  const rows = Array.from({ length: 30 }, (_, i) => i + 1);
+  const cols = ['A', 'B', 'C', 'D', 'E', 'F'];
+  const used = new Set();
+  const seats = [];
+  while (seats.length < count) {
+    const row = rows[Math.floor(Math.random() * rows.length)];
+    const col = cols[Math.floor(Math.random() * cols.length)];
+    const seat = `${row}${col}`;
+    if (!used.has(seat)) {
+      used.add(seat);
+      seats.push(seat);
+    }
+  }
+  return seats;
+};
+
+const FlightTicket = ({ ticket }) => {
+  if (!ticket) return null;
+
+  const passengers = ticket.passengers && ticket.passengers.length > 0
+    ? ticket.passengers
+    : [{ name: 'PASSENGER' }];
+
+  // Stable unique seats per PNR
+  const seats = React.useMemo(
+    () => generateSeats(passengers.length),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ticket.pnr, passengers.length]
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      {passengers.map((pax, idx) => (
+        <SingleBoardingPass
+          key={idx}
+          ticket={ticket}
+          passengerName={(pax.name || 'PASSENGER').toUpperCase()}
+          passengerIndex={idx}
+          seat={seats[idx]}
+        />
+      ))}
     </div>
   );
 };

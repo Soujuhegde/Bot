@@ -60,12 +60,28 @@ async def chat_endpoint(request: ChatRequest):
     from langchain_core.messages import AIMessage
     new_state["messages"].append(AIMessage(content=final_resp))
     
+    followup_msg = new_state.get("followup_message")
+    followup_replies = new_state.get("followup_quick_replies") or []
+    
     # Update session and persist to disk
     sessions[session_id] = new_state
+    # Clear one-shot fields so they don't bleed into next response
+    sessions[session_id]["followup_message"] = None
+    sessions[session_id]["followup_quick_replies"] = []
     save_sessions()
     
     options_to_show = new_state.get("options_to_show") or []
     current_step = new_state.get("current_step")
+    
+    current_flow = None
+    if current_step:
+        if current_step.startswith("hotel_"):
+            current_flow = "Hotel Booking"
+        elif current_step.startswith("itinerary_") or current_step == "plan_itinerary":
+            current_flow = "Itinerary Plan"
+        elif current_step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "ready_to_search", "flight_selecting", "awaiting_passenger_count", "verify_passenger_count", "awaiting_passenger_details", "awaiting_payment", "booking_confirmed"]:
+            current_flow = "Flight Booking"
+            
     ticket = new_state.get("ticket") if current_step in ["booking_confirmed", "hotel_booking_confirmed"] else None
     is_clarifying = current_step not in [
         "ready_to_search", "flight_selecting", "hotel_ready_to_search", "hotel_selecting",
@@ -80,5 +96,8 @@ async def chat_endpoint(request: ChatRequest):
         options=options_to_show,
         clarification_needed=bool(clarification_needed),
         quick_replies=quick_replies,
-        ticket=ticket
+        ticket=ticket,
+        followup_message=followup_msg,
+        followup_quick_replies=followup_replies,
+        current_flow=current_flow
     )

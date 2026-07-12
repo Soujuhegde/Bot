@@ -51,18 +51,22 @@ const HotelTicket = ({ ticket }) => {
         </div>
 
         {/* Shaded Occupancy Table */}
-        <div className="bg-[#f0f6ff] rounded-xl p-3 grid grid-cols-3 gap-2 text-center mb-4">
+        <div className="bg-[#f0f6ff] rounded-xl p-3 grid grid-cols-2 gap-3 text-left mb-4">
           <div>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Check In Time</p>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Check In Date/Time</p>
             <p className="font-bold text-slate-800 text-sm mt-0.5">{ticket.check_in_date || "12 PM"}</p>
           </div>
           <div>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Check Out Time</p>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Check Out Date/Time</p>
             <p className="font-bold text-slate-800 text-sm mt-0.5">{ticket.check_out_date || "11 AM"}</p>
           </div>
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Occupancy</p>
             <p className="font-bold text-slate-800 text-sm mt-0.5 truncate">{occupancy}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Guest Name</p>
+            <p className="font-bold text-slate-800 text-sm mt-0.5 truncate">{ticket.guest_name || "Guest"}</p>
           </div>
         </div>
 

@@ -382,8 +382,8 @@ const MessageBubble = ({ message, onQuickReply, onOptionSelect }) => {
     <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6`}>
       {/* Bot Avatar */}
       {!isUser && (
-        <div className="w-10 h-10 rounded-full overflow-hidden mr-3 flex-shrink-0 mt-1 shadow-sm border border-slate-200">
-          <img src="https://i.pravatar.cc/150?img=47" alt="AI Agent" className="w-full h-full object-cover" />
+        <div className="w-12 h-12 rounded-full overflow-hidden mr-3 flex-shrink-0 mt-1 shadow-sm border border-slate-200">
+          <img src="/sara bot.png" alt="AI Agent" className="w-full h-full object-cover" />
         </div>
       )}
       

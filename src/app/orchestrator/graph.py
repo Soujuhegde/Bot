@@ -224,7 +224,7 @@ def parse_intent(state: ConversationState):
     
     is_confirmation = result.intent == "confirm" or msg_text_lower in ["yes", "y", "yeah", "correct", "right", "ok", "okay", "sure", "proceed"] or "yes" in msg_text_lower
     is_rejection = result.intent == "reject" or msg_text_lower in ["no", "n", "nope", "wrong", "wait"] or "no" in msg_text_lower
-    is_show_others = is_rejection or "select another" in msg_text_lower or "other options" in msg_text_lower or "show others" in msg_text_lower
+    is_show_others = is_rejection or "select another" in msg_text_lower or "other options" in msg_text_lower or "show others" in msg_text_lower or "see all options" in msg_text_lower or "see all" in msg_text_lower
 
     if result.origin and (not flight_params.get("origin") or step == "awaiting_origin_dest"): 
         flight_params["origin"] = result.origin
@@ -240,8 +240,9 @@ def parse_intent(state: ConversationState):
     if result.check_out_date and (not hotel_params.get("check_out_date") or step == "hotel_awaiting_check_out"): 
         hotel_params["check_out_date"] = result.check_out_date
     
+    _flight_steps = {"awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type", "ready_to_search"}
     invalid_date = False
-    if result.departure_date and (not flight_params.get("departure_date") or step == "awaiting_departure_date"):
+    if result.departure_date and (not flight_params.get("departure_date") or step in _flight_steps):
         try:
             date_obj = datetime.strptime(result.departure_date, "%Y-%m-%d").date()
             if date_obj < datetime.now().date():
@@ -259,14 +260,27 @@ def parse_intent(state: ConversationState):
     incoming_step = step
     
     # Manual override for flight/hotel selection from UI clicks to guarantee accuracy
-    if any(w in msg_text_lower for w in ["plan an itinerary", "plan itinerary", "itinerary plan", "itinerary"]):
+    _itinerary_steps = {"itinerary_awaiting_city", "itinerary_awaiting_start_date", "itinerary_awaiting_days", "plan_itinerary"}
+    if any(w in msg_text_lower for w in ["plan an itinerary", "plan itinerary", "itinerary plan", "itinerary"]) and step not in _itinerary_steps:
+        result.intent = "plan_itinerary"
         pending_clarification = None
+        # Try to extract number of days from the message
         days_match = re.search(r"\b(\d+)\s*day", msg_text_lower)
         if days_match:
             hotel_params["itinerary_days"] = int(days_match.group(1))
-            step = "plan_itinerary"
-        else:
+
+        # Determine city from existing context
+        existing_city = hotel_params.get("city") or flight_params.get("destination")
+        existing_date = hotel_params.get("check_in_date") or flight_params.get("departure_date")
+
+        if not existing_city:
+            step = "itinerary_awaiting_city"
+        elif not existing_date and (selected_flight.get("airline_name") or selected_hotel.get("name")):
+            step = "itinerary_awaiting_start_date"
+        elif not hotel_params.get("itinerary_days"):
             step = "itinerary_awaiting_days"
+        else:
+            step = "plan_itinerary"
     elif user_msg_text.startswith("I would like to select hotel "):
         result.intent = "select_hotel"
         try:
@@ -390,9 +404,55 @@ def parse_intent(state: ConversationState):
         elif result.intent == "select_flight" and not user_msg_text.startswith("I would like to select "):
             # Prevent hallucinated flight selection
             step = "verify_passenger_count"
-            
-    if step == "plan_itinerary" or step == "itinerary_awaiting_days":
-        if step == "itinerary_awaiting_days" and incoming_step == "itinerary_awaiting_days":
+        elif result.intent == "provide_passenger_count" or result.adults_count or result.children_count or result.infants_count:
+            # User is CORRECTING the passenger count during verification (e.g., "2 adults" when 1 was shown)
+            adults = result.adults_count or 0
+            children = result.children_count or 0
+            infants = result.infants_count or 0
+            # If user only specified one type (e.g., "2 adults"), keep at least 1 adult if nothing else
+            if adults == 0 and children == 0 and infants == 0:
+                adults = 1
+            total = adults + children + infants
+            passenger_count = {"adults": adults, "children": children, "infants": infants, "total": total}
+            passengers_details = []
+            current_passenger_index = 0
+            step = "verify_passenger_count"  # Re-show verification with the corrected count
+            result.intent = "provide_passenger_count"
+
+    if step in ["plan_itinerary", "itinerary_awaiting_days", "itinerary_awaiting_city", "itinerary_awaiting_start_date"]:
+        if step == "itinerary_awaiting_city" and incoming_step == "itinerary_awaiting_city":
+            city_val = user_msg_text.strip()
+            if len(city_val) >= 2:
+                hotel_params["city"] = city_val
+                pending_clarification = None
+                # Move to next step
+                existing_date = hotel_params.get("check_in_date") or flight_params.get("departure_date")
+                if not existing_date and (selected_flight.get("airline_name") or selected_hotel.get("name")):
+                    step = "itinerary_awaiting_start_date"
+                elif not hotel_params.get("itinerary_days"):
+                    step = "itinerary_awaiting_days"
+                else:
+                    step = "plan_itinerary"
+            else:
+                pending_clarification = "⚠️ Validation Error:\n- Please enter a valid city name."
+
+        elif step == "itinerary_awaiting_start_date" and incoming_step == "itinerary_awaiting_start_date":
+            date_val = result.departure_date or result.check_in_date or user_msg_text.strip()
+            try:
+                date_obj = datetime.strptime(date_val, "%Y-%m-%d").date()
+                if date_obj < datetime.now().date():
+                    pending_clarification = "⚠️ Validation Error:\n- Please enter a present or future date."
+                else:
+                    hotel_params["check_in_date"] = date_val
+                    pending_clarification = None
+                    if not hotel_params.get("itinerary_days"):
+                        step = "itinerary_awaiting_days"
+                    else:
+                        step = "plan_itinerary"
+            except ValueError:
+                pending_clarification = "⚠️ Validation Error:\n- Please enter a valid date (e.g. 2025-08-15 or 'next Monday')."
+
+        elif step == "itinerary_awaiting_days" and incoming_step == "itinerary_awaiting_days":
             days_match = re.search(r"\b(\d+)\b", user_msg_text)
             if days_match:
                 hotel_params["itinerary_days"] = int(days_match.group(1))
@@ -405,14 +465,23 @@ def parse_intent(state: ConversationState):
     elif step in ["awaiting_origin_dest", "awaiting_departure_date", "invalid_departure_date", "awaiting_journey_type"]:
         step = get_next_flight_step(flight_params, invalid_date)
     elif step != "verify_passenger_count" and result.intent == "select_flight":
-        if result.selected_airline and not user_msg_text.startswith("I would like to select "): selected_flight["airline"] = result.selected_airline
-        if result.selected_class and not user_msg_text.startswith("I would like to select "): selected_flight["class"] = result.selected_class
-        if result.selected_price and not user_msg_text.startswith("I would like to select "): selected_flight["price"] = result.selected_price
-        if hasattr(result, "booking_link") and result.booking_link and not user_msg_text.startswith("I would like to select "): selected_flight["booking_link"] = result.booking_link
-        
-        step = "awaiting_passenger_count"
+        is_button_select = user_msg_text.startswith("I would like to select ")
+        if result.selected_airline and not is_button_select: selected_flight["airline"] = result.selected_airline
+        if result.selected_class and not is_button_select: selected_flight["class"] = result.selected_class
+        if result.selected_price and not is_button_select: selected_flight["price"] = result.selected_price
+        if hasattr(result, "booking_link") and result.booking_link and not is_button_select: selected_flight["booking_link"] = result.booking_link
+
+        # If user selected via natural language (e.g. "book cheapest one") and there are multiple options,
+        # first narrow down to that specific option and ask for confirmation before proceeding.
+        if not is_button_select and result.selected_option_index is not None and len(options_to_show) > 1:
+            identified_opt = options_to_show[result.selected_option_index]
+            options_to_show = [identified_opt]
+            step = "flight_selecting"   # Stay on selection; user must confirm
+        else:
+            step = "awaiting_passenger_count"
         
     elif step != "verify_passenger_count" and result.intent == "select_hotel" and not step.startswith("hotel_awaiting_") and step != "hotel_summary":
+        is_button_select_hotel = user_msg_text.startswith("I would like to select hotel ")
         pax = passengers_details[0] if passengers_details else (passenger_details or {})
         if pax.get("name") and not selected_hotel.get("guest_name"):
             selected_hotel["guest_name"] = pax.get("name")
@@ -420,13 +489,20 @@ def parse_intent(state: ConversationState):
             selected_hotel["guest_email"] = pax.get("email")
         if pax.get("contact") and not selected_hotel.get("guest_phone"):
             selected_hotel["guest_phone"] = pax.get("contact")
-            
-        if not selected_hotel.get("guest_name"): step = "hotel_awaiting_guest_name"
-        elif not selected_hotel.get("guest_email"): step = "hotel_awaiting_guest_email"
-        elif not selected_hotel.get("guest_phone"): step = "hotel_awaiting_guest_phone"
-        elif "special_requests" not in selected_hotel: step = "hotel_awaiting_special_requests"
-        elif "arrival_time" not in selected_hotel: step = "hotel_awaiting_arrival_time"
-        else: step = "hotel_summary"
+
+        # If user selected via natural language (e.g. "book cheapest hotel") and there are multiple options,
+        # first narrow down to that specific option and ask for confirmation before proceeding.
+        if not is_button_select_hotel and result.selected_option_index is not None and len(options_to_show) > 1:
+            identified_opt = options_to_show[result.selected_option_index]
+            options_to_show = [identified_opt]
+            step = "hotel_selecting"   # Stay on selection; user must confirm
+        else:
+            if not selected_hotel.get("guest_name"): step = "hotel_awaiting_guest_name"
+            elif not selected_hotel.get("guest_email"): step = "hotel_awaiting_guest_email"
+            elif not selected_hotel.get("guest_phone"): step = "hotel_awaiting_guest_phone"
+            elif "special_requests" not in selected_hotel: step = "hotel_awaiting_special_requests"
+            elif "arrival_time" not in selected_hotel: step = "hotel_awaiting_arrival_time"
+            else: step = "hotel_summary"
             
     elif (result.intent == "provide_passenger_count" and step in ["awaiting_passenger_count", "start", "verify_passenger_count"]) or (step == "awaiting_passenger_count" and result.intent != "general_qa"):
         adults = result.adults_count or 1
@@ -537,12 +613,7 @@ def parse_intent(state: ConversationState):
         elif step == "hotel_confirm_dates":
             if is_confirmation or user_msg_text.strip() == "✅ Yes" or "yes" in msg_text_lower:
                 hotel_params["check_in_date"] = flight_params.get("departure_date")
-                try:
-                    dt = datetime.strptime(hotel_params["check_in_date"], "%Y-%m-%d")
-                    hotel_params["check_out_date"] = (dt + timedelta(days=3)).strftime("%Y-%m-%d")
-                except:
-                    hotel_params["check_out_date"] = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
-                step = "hotel_awaiting_guests"
+                step = "hotel_awaiting_check_out"  # Ask for checkout date, do not assume 3 days!
             else:
                 step = "hotel_awaiting_check_in"
                 
@@ -585,7 +656,12 @@ def parse_intent(state: ConversationState):
             
         elif step == "hotel_awaiting_rooms":
             hotel_params["rooms"] = user_msg_text.strip()
+            step = "hotel_awaiting_room_type"  # Transition to Room Type step!
+
+        elif step == "hotel_awaiting_room_type":
+            hotel_params["room_type"] = user_msg_text.strip()
             step = "hotel_awaiting_budget"
+
             
         elif step == "hotel_awaiting_budget":
             val = user_msg_text.strip()
@@ -656,16 +732,29 @@ def parse_intent(state: ConversationState):
     ] or (step is not None and step.startswith("hotel_awaiting_"))
 
     is_active_flow = is_gathering_details or step in [
-        "ready_to_search", "flight_selecting", "booking_confirmed", "hotel_ready_to_search", "hotel_selecting", 
-        "hotel_summary", "hotel_awaiting_payment", "hotel_booking_confirmed",
-        "itinerary_awaiting_days", "plan_itinerary"
+        "ready_to_search", "flight_selecting", "hotel_ready_to_search", "hotel_selecting", 
+        "hotel_summary", "hotel_awaiting_payment",
+        "itinerary_awaiting_city", "itinerary_awaiting_start_date", "itinerary_awaiting_days"
     ]
 
     interruption_question = None
     if result.intent == "general_qa" and not is_active_flow:
         step = "general_qa"
     elif result.intent == "general_qa" and is_active_flow:
-        if is_question(user_msg_text):
+        is_providing_parameter = False
+        if step in ["awaiting_origin_dest", "hotel_awaiting_city", "itinerary_awaiting_city"] and (result.origin or result.destination or result.hotel_city):
+            is_providing_parameter = True
+        elif step in ["awaiting_departure_date", "hotel_awaiting_check_in", "hotel_awaiting_check_out"] and (result.departure_date or result.check_in_date or result.check_out_date):
+            is_providing_parameter = True
+        elif step in ["awaiting_passenger_count"] and (result.adults_count or result.children_count or result.infants_count):
+            is_providing_parameter = True
+        elif step == "itinerary_awaiting_days":
+            if re.search(r"\b\d+\b", user_msg_text):
+                is_providing_parameter = True
+
+        if is_confirmation or is_providing_parameter:
+            interruption_question = None
+        else:
             interruption_question = user_msg_text
         
     elif (result.intent == "book_hotel" or user_msg_text.strip().lower() == "book a hotel" or "hotel" in msg_text_lower) and not is_gathering_details:
@@ -702,6 +791,88 @@ def route_next(state: ConversationState):
         return "hotel_node"
     return "ask_clarification"
 
+def get_contextual_booking_reminder(step, state):
+    flight_params = state.get("flight_params") or {}
+    hotel_params = state.get("hotel_params") or {}
+    selected_flight = state.get("selected_flight") or {}
+    selected_hotel = state.get("selected_hotel") or {}
+    passenger_count = state.get("passenger_count") or {}
+    current_passenger_index = state.get("current_passenger_index") or 0
+
+    if step == "awaiting_origin_dest":
+        return "Could you please tell me where you are flying from and to so we can search for flights?"
+    elif step == "awaiting_departure_date":
+        return "Could you please provide your departure date (e.g. 'tomorrow' or 'next Monday')?"
+    elif step == "invalid_departure_date":
+        return "Please enter a valid present or future date to proceed with your booking."
+    elif step == "awaiting_journey_type":
+        return "To proceed, are you planning a one-way or round trip journey?"
+    elif step == "flight_selecting":
+        return "Please select one of the suggested flight options above to proceed, or let me know if you would like to see more options."
+    elif step == "awaiting_passenger_count":
+        return "To continue, could you please specify how many passengers will be traveling?"
+    elif step == "verify_passenger_count":
+        return "Please verify the passenger count details above. If correct, click 'Yes' or reply 'Yes' to proceed."
+    elif step == "awaiting_passenger_details":
+        total_pax = passenger_count.get("total") or 1
+        pax_num = current_passenger_index + 1
+        return f"Please provide the passenger details (Name, Email, Phone, Passport) for Passenger {pax_num} of {total_pax} to proceed."
+    elif step == "awaiting_payment":
+        if selected_hotel.get("name"):
+            return f"Please click the 'Proceed to Booking' button above to complete your stay at {selected_hotel.get('name')}, or reply 'Payment done' once finished."
+        else:
+            return "Please click the 'Proceed With Booking' button above to book your flight, or reply 'Payment done' once you've completed the payment."
+    elif step == "hotel_confirm_city":
+        dest = flight_params.get("destination", "your destination")
+        city_map = {"BOM": "Mumbai", "DEL": "Delhi", "BLR": "Bangalore", "SIN": "Singapore", "PNQ": "Pune"}
+        dest_name = city_map.get(dest.upper(), dest)
+        return f"Shall we search for hotels in {dest_name}?"
+    elif step == "hotel_confirm_dates":
+        check_in = flight_params.get("departure_date", "flight date")
+        return f"Would you like to check in to the hotel on the same day as your flight ({check_in})?"
+    elif step == "hotel_awaiting_city":
+        return "Which city would you like to book a hotel in?"
+    elif step == "hotel_awaiting_check_in":
+        return "When will you be checking in to the hotel? (Format: YYYY-MM-DD)"
+    elif step == "hotel_awaiting_check_out":
+        return "When is your check-out date from the hotel? (Format: YYYY-MM-DD)"
+    elif step == "hotel_awaiting_guests":
+        return "How many guests will be staying at the hotel?"
+    elif step == "hotel_awaiting_rooms":
+        return "How many rooms would you like to reserve?"
+    elif step == "hotel_awaiting_room_type":
+        return "What type of room would you prefer for your stay?"
+    elif step == "hotel_awaiting_budget":
+        return "What is your preferred budget range per night for the hotel?"
+    elif step == "hotel_awaiting_custom_budget":
+        return "Please enter your preferred budget range per night (e.g. ₹3,000–₹6,000)."
+    elif step == "hotel_awaiting_area":
+        return "Where in the city would you prefer to stay (e.g. near airport, city centre)?"
+    elif step == "hotel_awaiting_category":
+        return "What class or type of hotel are you looking for?"
+    elif step == "hotel_awaiting_guest_name":
+        return "Could you please provide the guest's full name for the booking?"
+    elif step == "hotel_awaiting_guest_email":
+        return "Could you please provide the guest's email address for confirmation?"
+    elif step == "hotel_awaiting_guest_phone":
+        return "Could you please provide the guest's contact number for the reservation?"
+    elif step == "hotel_awaiting_special_requests":
+        return "Do you have any special requests for the stay, or should we skip this?"
+    elif step == "hotel_awaiting_arrival_time":
+        return "What is your estimated arrival time at the hotel, or would you like to skip this?"
+    elif step == "hotel_summary":
+        return "Please verify the hotel booking details above. If correct, click 'Payment Done' or reply 'Payment done'."
+    elif step == "hotel_awaiting_payment":
+        return f"Please click the 'Proceed to Booking' button above to complete your stay at {selected_hotel.get('name')}, or say 'Payment Done' once finished."
+    elif step == "itinerary_awaiting_city":
+        return "Which city or destination would you like me to plan the itinerary for?"
+    elif step == "itinerary_awaiting_start_date":
+        city = hotel_params.get("city") or flight_params.get("destination") or "your destination"
+        return f"When are you planning to start your trip to {city}?"
+    elif step == "itinerary_awaiting_days":
+        return "For how many days would you like me to plan the itinerary?"
+    return None
+
 def ask_clarification(state: ConversationState):
     step = state.get("current_step")
     latest_intent = state.get("latest_intent")
@@ -731,22 +902,32 @@ def ask_clarification(state: ConversationState):
                 else:
                     options_context += f"- Hotel Option {idx}: Hotel {opt.get('name')}, rating {opt.get('star_rating')}, price per night {opt.get('price_per_night')}, amenities {', '.join(opt.get('amenities', []))}\n"
 
-        qa_prompt = f"""You are a specialized travel assistant chatbot.
-The user is in the middle of a booking flow, and asked a travel-related question: "{interruption_question}"
-Please answer their question directly, accurately, and concisely. Keep your answer strictly under 2 sentences. 
-Do not decline the question if it is travel-related (destination, sightseeing, weather, culture, etc.).
+        qa_prompt = f"""You are a friendly travel assistant chatbot helping the user complete a booking.
+
+The user sent this message while in the middle of a booking: "{interruption_question}"
+
+Classify the message into ONE of these 3 categories and respond accordingly:
+
+CATEGORY 1 — GREETING or CASUAL (hello, hi, hey, thanks, how are you, good morning, ok, sure, etc.):
+   Respond warmly and naturally, then gently redirect to the booking.
+   Example for "hello": "Hello! 😊 Is there anything I can help you with, or shall we continue with your booking?"
+   Example for "thanks": "You're welcome! Shall we continue with your booking? or You are Welcome , Please let me know if u need any help " 
+   Keep it short, friendly, and conversational.
+
+CATEGORY 2 — TRAVEL-RELATED QUESTION (airports, airlines, visa, luggage, destination tips, hotel amenities, weather for a trip, "what to eat in [city]", etc.):
+   Answer directly and concisely in under 2 sentences.
+
+CATEGORY 3 — COMPLETELY OFF-TOPIC (generic food recipes like "what is biryani", coding, math, science, personal advice, anything unrelated to travel):
+   Set answer to EXACTLY: "I'm sorry, I can only assist with travel-related queries such as flight bookings, hotel reservations, and itinerary planning."
+
+NOTE: "What to eat in Goa?" = CATEGORY 2 (destination food = travel). "What is chicken biryani?" = CATEGORY 3 (generic recipe = off-topic).
 {options_context}
-
-You must respond with a JSON object containing two fields:
-1. "answer": Your text answer.
-2. "identified_option_index": If the user's question is asking to identify, compare, or pinpoint a single specific option from the visible options list (e.g., 'which is the cheapest?', 'which is the most expensive?', 'which one is the Indigo flight?', 'which hotel has the pool?'), set this to the 0-based index of that option (integer). Otherwise, set this to null.
-
-JSON format:
+Respond with a raw JSON object only:
 {{
   "answer": "...",
   "identified_option_index": null or integer
-}}
-Do not include any other text, markdown formatting, or wrappers. Respond with a raw JSON string."""
+}}"""
+
         try:
             msgs = [SystemMessage(content=qa_prompt)] + state["messages"][-2:]
             response = llm.invoke(msgs)
@@ -782,37 +963,42 @@ Do not include any other text, markdown formatting, or wrappers. Respond with a 
     clarification_repeats = state.get("clarification_repeats") or {}
     repeats = clarification_repeats.get(step or "start", 0)
 
+    _DECLINE_MARKER = "I'm sorry, I can only assist"
+
     def make_response(res_dict):
         if interruption_answer:
-            if identified_index is not None and step in ["flight_selecting", "hotel_selecting"]:
+            answer_text = interruption_answer.strip()
+            
+            # Message 1 (main response) is the answer to greeting/question/decline
+            res_dict["final_response"] = answer_text
+            
+            # Message 2 (followup message) is a contextual reminder of the booking step
+            reminder = get_contextual_booking_reminder(step, state)
+            if not reminder:
+                reminder = res_dict.get("final_response") or ""
+                
+            res_dict["followup_message"] = reminder
+            res_dict["followup_quick_replies"] = res_dict.get("quick_replies", [])
+            
+            # Since followup_message is present, clear main bubble's quick replies
+            res_dict["quick_replies"] = []
+            
+            # Special case: identified option in flight/hotel selection
+            if identified_index is not None and step in ["flight_selecting", "hotel_selecting"] and not answer_text.startswith(_DECLINE_MARKER):
                 options_to_show = state.get("options_to_show") or []
                 if 0 <= identified_index < len(options_to_show):
                     single_option = options_to_show[identified_index]
                     type_str = "flight" if (single_option.get("type") == "flight" or "pricing" in single_option) else "hotel"
-                    reminder_prefix = f"Would you like to proceed with this {type_str} or do you want to select another one?"
-                    
-                    res_dict["final_response"] = f"{interruption_answer.strip()}\n\n{reminder_prefix}"
+                    res_dict["followup_message"] = f"Would you like to proceed with this {type_str} or do you want to select another one?"
                     res_dict["options_to_show"] = [single_option]
-                    res_dict["quick_replies"] = ["Proceed with this option", "Select another one"]
-                    res_dict["interruption_question"] = None
-                    res_dict["clarification_repeats"] = clarification_repeats
-                    return res_dict
-
-            prompt_msg = res_dict.get("final_response", "")
-            
-            if step in ["flight_selecting", "hotel_selecting"]:
-                reminder_prefix = "Please select one of the suggested options above to proceed with your booking:\n"
-                options_to_keep = res_dict.get("options_to_show") or options
-                res_dict["options_to_show"] = options_to_keep
-            else:
-                reminder_prefix = "Could you please answer this to proceed with your booking?\n"
+                    res_dict["followup_quick_replies"] = ["Proceed with this option", "Select another one"]
+            elif step in ["flight_selecting", "hotel_selecting"]:
+                res_dict["options_to_show"] = res_dict.get("options_to_show") or options
                 
-            res_dict["final_response"] = f"{interruption_answer.strip()}\n\n{reminder_prefix}{prompt_msg}"
-        
         res_dict["interruption_question"] = None
         res_dict["clarification_repeats"] = clarification_repeats
         return res_dict
-    
+
     # If the user goes off-topic or says something conversational/harsh, handle it dynamically
     if step == "general_qa":
         if llm:
@@ -834,12 +1020,12 @@ Guidelines:
         else:
             msg = "I'm here to help you with your travel bookings! Could we get back to that?"
             
-        return make_response({"final_response": msg, "quick_replies": [], "options_to_show": []})
+        return make_response({"final_response": msg, "quick_replies": ["Book a Flight", "Book a Hotel", "Plan an Itinerary"], "options_to_show": []})
         
     if step == "awaiting_origin_dest":
-        msg = "I can help with that! Where are you flying from and to?"
+        msg = "Hi! I'm Sara, your AI travel companion. Let's find you the best flight. Where are you flying from and to?"
     elif step == "invalid_departure_date":
-        msg = "Wrong data. Please enter a present or future date."
+        msg = "Oops! It looks like the date you entered is in the past. Could you please provide a valid departure date? For example, you could say \"tomorrow\", \"next Monday\", or any upcoming date."
         replies = ["Today", "Tomorrow"]
     elif step == "awaiting_departure_date":
         msg = "Sure! I'll assist you in finding the best flights.\n\nWhen are you departing? For instance, you could say \"tomorrow,\" \"next Monday,\" or \"7th December.\""
@@ -848,11 +1034,19 @@ Guidelines:
         msg = "Are you planning a one-way or return journey?"
         replies = ["One Way", "Round Trip"]
     elif step == "flight_selecting":
-        msg = "Here are the flight options. Click to choose your preferred one."
         options = state.get("options_to_show") or []
+        if len(options) == 1:
+            msg = "Here's the flight I found for you based on your request. Would you like to proceed with this one, or see all available options?"
+            replies = ["Proceed with this option", "See all options"]
+        else:
+            msg = "Here are the flight options. Click to choose your preferred one."
     elif step == "hotel_selecting":
-        msg = "Here are some great hotels for your stay. Click to choose your preferred one."
         options = state.get("options_to_show") or []
+        if len(options) == 1:
+            msg = "Here's the hotel I found for you based on your request. Would you like to proceed with this one, or see all available options?"
+            replies = ["Proceed with this option", "See all options"]
+        else:
+            msg = "Here are some great hotels for your stay. Click to choose your preferred one."
         
     elif step == "hotel_confirm_city":
         dest = flight_params.get("destination", "Pune")
@@ -867,7 +1061,7 @@ Guidelines:
         replies = ["✅ Yes", "✏️ Edit Dates"]
         
     elif step == "hotel_awaiting_city":
-        msg = "Where would you like to stay? Which city?"
+        msg = "Hi! I'm Sara, your AI travel companion. I'll help you find the perfect hotel. Which city would you like to stay in?"
         
     elif step == "hotel_awaiting_check_in":
         clarification = state.get("pending_clarification")
@@ -888,6 +1082,10 @@ Guidelines:
     elif step == "hotel_awaiting_rooms":
         msg = "How many rooms would you like to book?"
         replies = ["1 Room", "2 Rooms", "Custom"]
+        
+    elif step == "hotel_awaiting_room_type":
+        msg = "What type of room would you prefer for your stay?"
+        replies = ["Standard Room", "Deluxe Room", "Luxury Room / Suite", "No Preference"]
         
     elif step == "hotel_awaiting_budget":
         msg = "What's your preferred budget per night?"
@@ -928,20 +1126,35 @@ Guidelines:
         replies = ["Skip", "No preference"]
         
     elif step == "hotel_summary":
-        price_str = selected_hotel.get("price", "₹3,200")
+        price_str = selected_hotel.get("price", selected_hotel.get("price_per_night", "₹3,200"))
+        try:
+            d1 = datetime.strptime(hotel_params.get("check_in_date"), "%Y-%m-%d")
+            d2 = datetime.strptime(hotel_params.get("check_out_date"), "%Y-%m-%d")
+            nights = (d2 - d1).days
+            if nights <= 0: nights = 1
+        except:
+            nights = 1
+
+        rooms_str = hotel_params.get("rooms", "1")
+        try:
+            rooms_clean = int("".join(filter(str.isdigit, rooms_str)))
+            if rooms_clean <= 0: rooms_clean = 1
+        except:
+            rooms_clean = 1
+
         try:
             p_clean = int("".join(filter(str.isdigit, price_str)))
-            total_p = p_clean * 3
-            total_price = f"₹{total_p:,}"
+            total_p = p_clean * nights * rooms_clean
+            total_price = f"₹{total_p:,}.00"
         except:
-            total_price = f"{price_str} x 3 nights"
+            total_price = f"{price_str} x {nights} night(s)"
             
-        msg = f"📋 Booking Summary\n\n🏨 Hotel: {selected_hotel.get('name')}\n🌆 City: {hotel_params.get('city', 'Mumbai')}\n📅 Check-in: {hotel_params.get('check_in_date')}\n📅 Check-out: {hotel_params.get('check_out_date')}\n👥 Guests: {hotel_params.get('guests', '1 Adult')}\n🛏️ Rooms: {hotel_params.get('rooms', '1')}\n💰 Total Price: {total_price}\n👤 Guest Name: {selected_hotel.get('guest_name')}"
+        msg = f"📋 Booking Summary\n\n🏨 Hotel: {selected_hotel.get('name')}\n🌆 City: {hotel_params.get('city', 'Mumbai')}\n🛋️ Room Type: {hotel_params.get('room_type', 'Standard Room')}\n📅 Check-in: {hotel_params.get('check_in_date')}\n📅 Check-out: {hotel_params.get('check_out_date')}\n👥 Guests: {hotel_params.get('guests', '1 Adult')}\n🛏️ Rooms: {hotel_params.get('rooms', '1')}\n💰 Total Price: {total_price}\n👤 Guest Name: {selected_hotel.get('guest_name')}"
         replies = ["Payment Done"]
-        options = [{"type": "action_button", "label": "Proceed to Booking", "url": selected_hotel.get("booking_link") or "https://booking.com"}]
+        options = [{"type": "action_button", "label": "Proceed to Booking", "url": selected_hotel.get("booking_link") or selected_hotel.get("booking_url") or "https://booking.com"}]
         
     elif step == "hotel_awaiting_payment":
-        link = selected_hotel.get("booking_link") or "https://booking.com"
+        link = selected_hotel.get("booking_link") or selected_hotel.get("booking_url") or "https://booking.com"
         msg = f"Perfect! Let's proceed with booking your stay at {selected_hotel.get('name')}."
         replies = ["Payment Done"]
         options = [{"type": "action_button", "label": "Proceed to Booking", "url": link}]
@@ -950,7 +1163,7 @@ Guidelines:
         pnr = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
         
         # Calculate total price
-        price_str = selected_hotel.get("price", "₹2,250")
+        price_str = selected_hotel.get("price", selected_hotel.get("price_per_night", "₹2,250"))
         try:
             p_clean = int("".join(filter(str.isdigit, price_str)))
             try:
@@ -980,11 +1193,12 @@ Guidelines:
         if not formatted_price.endswith(".00") and "." not in formatted_price:
             formatted_price = f"{formatted_price}.00"
             
-        room_type = "Executive Rooms"
-        if selected_hotel.get("star_rating", 3) >= 5:
-            room_type = "Executive Rooms"
-        else:
-            room_type = "Standard Rooms"
+        room_type = hotel_params.get("room_type")
+        if not room_type:
+            if selected_hotel.get("star_rating", 3) >= 5:
+                room_type = "Executive Room"
+            else:
+                room_type = "Standard Room"
             
         hotel_ticket = {
             "hotel_name": selected_hotel.get("name", "The Hotel Prime"),
@@ -997,6 +1211,7 @@ Guidelines:
             "price_per_night": formatted_price,
             "total_price": total_price,
             "nights": nights,
+            "guest_name": selected_hotel.get("guest_name", "Guest"),
             "image": selected_hotel.get("images", [""])[0] if selected_hotel.get("images") else "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=200&q=80"
         }
         
@@ -1053,11 +1268,24 @@ Guidelines:
             msg = "Perfect! Let's proceed with your booking."
             replies = ["Payment done"]
             options = [{"type": "action_button", "label": "Proceed With Booking", "url": link}]
-    elif step == "itinerary_awaiting_days":
-        flight = state.get("selected_flight") or {}
-        hotel = state.get("selected_hotel") or {}
-        fp = state.get("flight_params") or {}
+    elif step == "itinerary_awaiting_city":
+        clarification = state.get("pending_clarification")
+        prefix = f"{clarification}\n\n" if clarification else ""
+        msg = f"{prefix}Hi! I'm Sara, your AI travel companion. I'd love to plan a custom itinerary for you! Which city or destination are you planning to visit?"
+        return make_response({"final_response": msg, "quick_replies": [], "options_to_show": []})
+
+    elif step == "itinerary_awaiting_start_date":
         hp = state.get("hotel_params") or {}
+        city = hp.get("city", "your destination")
+        clarification = state.get("pending_clarification")
+        prefix = f"{clarification}\n\n" if clarification else ""
+        msg = f"{prefix}Great choice! 🌍 When are you planning to start your trip to **{city}**? (e.g. 2025-08-15 or 'next Monday')"
+        replies = ["Today", "Tomorrow"]
+        return make_response({"final_response": msg, "quick_replies": replies, "options_to_show": []})
+
+    elif step == "itinerary_awaiting_days":
+        hp = state.get("hotel_params") or {}
+        fp = state.get("flight_params") or {}
         check_in = hp.get("check_in_date") or fp.get("departure_date")
         check_out = hp.get("check_out_date")
         days = 0
@@ -1068,16 +1296,16 @@ Guidelines:
                 days = (d2 - d1).days
             except:
                 pass
-                
+
         clarification = state.get("pending_clarification")
         prefix = f"{clarification}\n\n" if clarification else ""
-        
-        msg = f"{prefix}Great! I can plan a customized travel itinerary for you. How many days would you like me to plan the itinerary for?"
-        
+        city = hp.get("city") or fp.get("destination", "your destination")
+        msg = f"{prefix}Perfect! 🗓️ How many days would you like me to plan the itinerary for **{city}**?"
+
         replies = ["3 Days", "5 Days", "7 Days"]
         if days > 0 and str(days) not in ["3", "5", "7"]:
             replies.append(f"{days} Days")
-            
+
         return make_response({"final_response": msg, "quick_replies": replies, "options_to_show": []})
 
     elif step == "plan_itinerary":
@@ -1090,7 +1318,7 @@ Guidelines:
         itinerary_days = hp.get("itinerary_days", 3)
         check_in = hp.get("check_in_date") or fp.get("departure_date") or "today"
         
-        itinerary_prompt = f"""You are an expert travel planner. Create a highly customized, beautiful, and engaging travel itinerary for a trip to {city}.
+        itinerary_prompt = f"""You are an expert travel planner. Create a highly customized, beautiful, and detailed day-by-day travel itinerary for a trip to {city}.
         
         Trip Details:
         - Destination City: {city}
@@ -1099,13 +1327,20 @@ Guidelines:
         - Flight details: {flight.get('airline_name', 'N/A')} flight {flight.get('flight_numbers', 'N/A')}
         - Guests / Occupancy: {hp.get('guests', '1 Adult')}
         
-        Create a detailed, beautiful day-by-day travel itinerary strictly for {itinerary_days} days. 
-        Structure your response beautifully using markdown:
-        - Use clean headings (e.g. ### Day 1: [Theme])
-        - Bullet points for activities
-        - Highlight popular sights, dining recommendations, and travel tips
-        - Use emojis to make it lively and modern.
-        Keep the response engaging but concise enough to fit comfortably in a chat message."""
+        Create a detailed, beautiful day-by-day travel itinerary strictly for {itinerary_days} days.
+        Provide a complete and comprehensive plan. For each day, include:
+        - A theme for the day (e.g. ### Day 1: Exploring Historic Sights)
+        - Morning activities/sightseeing with specific details
+        - Afternoon dining and shopping recommendations
+        - Evening entertainment, views, or dinner options
+        - Local secrets, travel tips, and transport recommendations
+        
+        Rules:
+        1. Do NOT summarize or shorten the days.
+        2. Present a detailed day-by-day schedule, using clean Markdown.
+        3. Use bullet points for activities and bold names of locations/attractions.
+        4. Use lively, modern emojis to make the itinerary visually engaging.
+        5. Generate a full, detailed plan for all {itinerary_days} days."""
         
         response = llm.invoke([SystemMessage(content=itinerary_prompt)])
         msg = response.content

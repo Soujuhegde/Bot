@@ -82,20 +82,128 @@ def call_flight_agent(request: TaskRequest) -> TaskResponse:
                 origin_code = dep.get('id', params.get('origin', ''))
                 destination_code = arr.get('id', params.get('destination', ''))
                 
-                custom_link = google_flights_url
-                try:
-                    num = flight_number.split(" ")[-1] if " " in flight_number else flight_number
-                    airline_lower = airline.lower()
-                    if airline_lower == "indigo":
-                        custom_link = f"https://www.goindigo.in/book/flight-select.html?cid=metasearch|googleflights&fareType=R&flightNumber={num}&origin={origin_code}&destination={destination_code}"
-                    elif airline_lower == "air india express":
-                        custom_link = f"https://www.airindiaexpress.com/book?flightNumber={num}&origin={origin_code}&destination={destination_code}"
-                    elif airline_lower == "air india":
-                        custom_link = f"https://www.airindia.com/in/en/ibe/booking.html?flightNumber={num}&origin={origin_code}&destination={destination_code}#/availability/departure"
-                    elif "srilankan" in airline_lower:
-                        custom_link = f"https://www.srilankan.com/en_uk/plan-and-book/flight-selection?origin={origin_code}&destination={destination_code}&flightNumber={num}"
-                except:
-                    pass
+                dep_date = params.get("departure_date", "")   # YYYY-MM-DD
+                adults  = max(1, (params.get("adults_count") or 1))
+
+                # ---- Comprehensive official airline booking URL map ----
+                airline_lower = airline.lower().strip()
+                num = flight_number.replace(" ", "") if flight_number else ""
+
+                def _gf():
+                    """Google Flights deep link as universal fallback."""
+                    return (
+                        f"https://www.google.com/travel/flights/search?"
+                        f"tfs=CBwQAhoeEgoyMDI1LTA4LTAxagcIARIDQkxScgcIARIDREVMGAFwAYIBCwj___________8B&curr=INR"
+                    ) if not google_flights_url else google_flights_url
+
+                # Build origin/destination formatted for deep links
+                o = origin_code.upper()
+                d = destination_code.upper()
+                dt = dep_date  # YYYY-MM-DD
+
+                if "indigo" in airline_lower or "6e" in airline_lower:
+                    custom_link = (
+                        f"https://www.goindigo.in/flight/search/{o}/{d}/{dt}/{adults}/0/0/E/O"
+                    )
+                elif "spicejet" in airline_lower or "sg" in airline_lower:
+                    custom_link = (
+                        f"https://book.spicejet.com/?departureDate={dt}"
+                        f"&origin={o}&destination={d}&adults={adults}&children=0&infants=0&tripType=O"
+                    )
+                elif "akasa" in airline_lower or "qp" in airline_lower:
+                    custom_link = (
+                        f"https://www.akasaair.com/booking/flight-list?"
+                        f"origin={o}&destination={d}&date={dt}&adults={adults}&children=0&infants=0&tripType=O"
+                    )
+                elif "air india express" in airline_lower or "ix" in airline_lower:
+                    custom_link = (
+                        f"https://www.airindiaexpress.com/flight-listing?"
+                        f"origin={o}&destination={d}&depDate={dt}&adults={adults}&children=0&infants=0&tripType=O"
+                    )
+                elif "air india" in airline_lower or "ai" in airline_lower:
+                    custom_link = (
+                        f"https://www.airindia.com/in/en/ibe/booking.html?"
+                        f"origin={o}&destination={d}&departureDate={dt}&adults={adults}&children=0&infants=0&tripType=O"
+                        f"#/availability/departure"
+                    )
+                elif "vistara" in airline_lower or "uk" in airline_lower:
+                    # Vistara merged into Air India
+                    custom_link = (
+                        f"https://www.airindia.com/in/en/ibe/booking.html?"
+                        f"origin={o}&destination={d}&departureDate={dt}&adults={adults}"
+                        f"#/availability/departure"
+                    )
+                elif "star air" in airline_lower or "s5" in airline_lower:
+                    custom_link = f"https://www.starair.in/book-ticket?from={o}&to={d}&date={dt}&adults={adults}"
+                elif "alliance air" in airline_lower:
+                    custom_link = _gf()
+                elif "srilankan" in airline_lower or "ul" in airline_lower:
+                    custom_link = (
+                        f"https://www.srilankan.com/en_uk/plan-and-book/flight-selection?"
+                        f"origin={o}&destination={d}&date={dt}&adults={adults}&type=O"
+                    )
+                elif "emirates" in airline_lower or "ek" in airline_lower:
+                    custom_link = (
+                        f"https://www.emirates.com/ae/english/booking/?"
+                        f"departureCode={o}&arrivalCode={d}&departureDate={dt}&adults={adults}&type=one-way"
+                    )
+                elif "singapore" in airline_lower or "sq" in airline_lower:
+                    custom_link = (
+                        f"https://www.singaporeair.com/en_UK/ppsclubs/flight-search/?"
+                        f"departureCode={o}&arrivalCode={d}&departureDate={dt}&adults={adults}"
+                    )
+                elif "qatar" in airline_lower or "qr" in airline_lower:
+                    custom_link = (
+                        f"https://www.qatarairways.com/en/homepage.html#search?"
+                        f"origin={o}&destination={d}&departure={dt}&adults={adults}&type=O"
+                    )
+                elif "etihad" in airline_lower or "ey" in airline_lower:
+                    custom_link = (
+                        f"https://www.etihad.com/en-in/fly-etihad/book/?from={o}&to={d}"
+                        f"&date={dt}&adults={adults}&type=one-way"
+                    )
+                elif "british" in airline_lower or "ba" in airline_lower:
+                    custom_link = (
+                        f"https://www.britishairways.com/travel/book/public/en_in?"
+                        f"origin={o}&destination={d}&outboundDate={dt}&adults={adults}&type=ECONOMY"
+                    )
+                elif "lufthansa" in airline_lower or "lh" in airline_lower:
+                    custom_link = (
+                        f"https://www.lufthansa.com/in/en/flight-search?"
+                        f"origin={o}&destination={d}&outwardDate={dt}&numberOfPassengers={adults}&travelClass=Y"
+                    )
+                elif "united" in airline_lower or "ua" in airline_lower:
+                    custom_link = (
+                        f"https://www.united.com/en/us/fsr/choose-flights?"
+                        f"f={o}&t={d}&d={dt}&tt=1&at={adults}&ct=0&ict=0&lang=en-US&_srt=PRICE_LOWEST"
+                    )
+                elif "american" in airline_lower or " aa" in airline_lower:
+                    custom_link = (
+                        f"https://www.aa.com/booking/search?locale=en_US&pax={adults}&adult={adults}"
+                        f"&type=OneWay&searchType=Book&cabin=&carriers=AA"
+                        f"&fromCity={o}&toCity={d}&departDate={dt}"
+                    )
+                elif "delta" in airline_lower or "dl" in airline_lower:
+                    custom_link = (
+                        f"https://www.delta.com/us/en/flight-search/results?"
+                        f"cacheKeySuffix=en-US&originCode={o}&destinationCode={d}"
+                        f"&selectedDate={dt}&paxCount={adults}&tripType=ONE_WAY"
+                    )
+                elif "thai" in airline_lower or "tg" in airline_lower:
+                    custom_link = f"https://www.thaiairways.com/en_TH/tg_flights/flights/flight_booking.page?from={o}&to={d}&date={dt}"
+                elif "malaysia" in airline_lower or "mh" in airline_lower:
+                    custom_link = f"https://booking.malaysiaairlines.com/cgi-bin/mas/mas_fltsched.pl?type=OW&from={o}&to={d}&date={dt}&pax={adults}"
+                elif "cathay" in airline_lower or "cx" in airline_lower:
+                    custom_link = f"https://www.cathaypacific.com/cx/en_IN/flights/flight-search.html?origin={o}&destination={d}&departureDate={dt}&type=ow"
+                elif "oman" in airline_lower or "wy" in airline_lower:
+                    custom_link = f"https://www.omanair.com/en/book-flights?from={o}&to={d}&date={dt}&adults={adults}"
+                elif "fly dubai" in airline_lower or "flydubai" in airline_lower or "fz" in airline_lower:
+                    custom_link = f"https://www.flydubai.com/en/booking/?from={o}&to={d}&departureDate={dt}&type=OW&adults={adults}"
+                elif "air arabia" in airline_lower or "g9" in airline_lower:
+                    custom_link = f"https://www.airarabia.com/en/book-flights?dep={o}&arr={d}&date={dt}&adults={adults}"
+                else:
+                    custom_link = _gf()
+
                 
                 if base_price:
                     formatted_base = f"INR {base_price:,.2f}"

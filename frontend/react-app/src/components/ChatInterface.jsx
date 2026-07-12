@@ -7,12 +7,12 @@ import TypingIndicator from './TypingIndicator';
 // Simple random string generator
 const generateId = () => Math.random().toString(36).substring(2, 15);
 
-const ChatInterface = () => {
+const ChatInterface = ({ onFlowChange }) => {
   const [messages, setMessages] = useState([
     {
       id: 1,
       sender: 'bot',
-      text: 'Hi there! I am your AI travel assistant. I can help you find flights and hotels. Where would you like to go?',
+      text: "Hi there! I'm Sara, your AI travel companion. I can help you find flights, book hotels, and plan custom itineraries. Where would you like to go today?",
     }
   ]);
   const [input, setInput] = useState('');
@@ -29,6 +29,13 @@ const ChatInterface = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  const isInitialState = !hasStarted && messages.length === 1;
+  useEffect(() => {
+    if (isInitialState && onFlowChange) {
+      onFlowChange(null);
+    }
+  }, [isInitialState, onFlowChange]);
 
   const sendMessage = async (text) => {
     if (!text.trim()) return;
@@ -50,16 +57,36 @@ const ChatInterface = () => {
         session_id: sessionId
       });
 
+      if (response.data.current_flow && onFlowChange) {
+        onFlowChange(response.data.current_flow);
+      }
+
       const botMessage = {
         id: Date.now() + 1,
         sender: 'bot',
         text: response.data.message,
-        options: response.data.options,
-        quick_replies: response.data.quick_replies,
+        options: response.data.followup_message ? [] : response.data.options,  // no options on decline msg
+        quick_replies: response.data.followup_message ? [] : response.data.quick_replies,
         ticket: response.data.ticket
       };
 
       setMessages(prev => [...prev, botMessage]);
+
+      // If there's a followup (e.g. booking step reminder after a decline), render it as a second bubble
+      if (response.data.followup_message) {
+        setTimeout(() => {
+          const followupMessage = {
+            id: Date.now() + 2,
+            sender: 'bot',
+            text: response.data.followup_message,
+            options: response.data.options,
+            quick_replies: response.data.followup_quick_replies || response.data.quick_replies,
+            ticket: null
+          };
+          setMessages(prev => [...prev, followupMessage]);
+        }, 600);
+      }
+
     } catch (error) {
       console.error("Error communicating with chat API:", error);
       const errorMessage = {
@@ -76,6 +103,9 @@ const ChatInterface = () => {
   const handleMenuOption = async (option) => {
     setIsMenuOpen(false);
     setHasStarted(true);
+    if (onFlowChange) {
+      onFlowChange(option);
+    }
     let activeSessionId = sessionId;
     if (option === "Flight Booking" || option === "Itinerary Plan") {
       activeSessionId = generateId();
@@ -95,6 +125,10 @@ const ChatInterface = () => {
         message: triggerMsg,
         session_id: activeSessionId
       });
+
+      if (response.data.current_flow && onFlowChange) {
+        onFlowChange(response.data.current_flow);
+      }
 
       const botMessage = {
         id: Date.now(),
@@ -130,7 +164,7 @@ const ChatInterface = () => {
     "I want to go to Tokyo in June"
   ];
 
-  const isInitialState = !hasStarted && messages.length === 1;
+
 
   const getGreeting = () => {
     const hour = new Date().getHours();
