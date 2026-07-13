@@ -86,21 +86,21 @@ const renderMessageText = (text, isUser) => {
   return lines.map((line, index) => {
     if (line.startsWith('### ')) {
       return (
-        <h3 key={index} className={`font-bold ${headingColorClass} text-[18px] md:text-[19px] mt-4 mb-2 flex items-center gap-1.5 border-b pb-1`}>
+        <h3 key={index} className={`font-bold ${headingColorClass} text-[20px] md:text-[21px] mt-4 mb-2 flex items-center gap-1.5 border-b pb-1`}>
           {renderLineContent(line.slice(4), isUser, boldBgClass)}
         </h3>
       );
     }
     if (line.startsWith('## ')) {
       return (
-        <h2 key={index} className={`font-black ${headingColorClass} text-[20px] md:text-[21px] mt-5 mb-3 flex items-center gap-1.5`}>
+        <h2 key={index} className={`font-black ${headingColorClass} text-[22px] md:text-[23px] mt-5 mb-3 flex items-center gap-1.5`}>
           {renderLineContent(line.slice(3), isUser, boldBgClass)}
         </h2>
       );
     }
     if (line.startsWith('# ')) {
       return (
-        <h1 key={index} className={`font-black ${headingColorClass} text-[22px] md:text-[23px] mt-5 mb-4`}>
+        <h1 key={index} className={`font-black ${headingColorClass} text-[24px] md:text-[25px] mt-5 mb-4`}>
           {renderLineContent(line.slice(2), isUser, boldBgClass)}
         </h1>
       );
@@ -111,7 +111,7 @@ const renderMessageText = (text, isUser) => {
       return (
         <div key={index} className={`flex items-start gap-2 ml-4 my-1.5 ${textColorClass} leading-relaxed`}>
           <span className={`font-bold select-none ${bulletColorClass}`}>•</span>
-          <p className="flex-1 text-[17px] md:text-[18px]">{renderLineContent(content, isUser, boldBgClass)}</p>
+          <p className="flex-1 text-[19px] md:text-[20px]">{renderLineContent(content, isUser, boldBgClass)}</p>
         </div>
       );
     }
@@ -121,7 +121,7 @@ const renderMessageText = (text, isUser) => {
     }
 
     return (
-      <p key={index} className={`leading-relaxed my-1 text-[17px] md:text-[18px] ${textColorClass}`}>
+      <p key={index} className={`leading-relaxed my-1 text-[19px] md:text-[20px] ${textColorClass}`}>
         {renderLineContent(line, isUser, boldBgClass)}
       </p>
     );
@@ -257,8 +257,8 @@ const ItineraryTimeline = ({ text, isUser }) => {
           🗺️
         </div>
         <div>
-          <div className="text-[13px] uppercase tracking-widest text-slate-400 font-extrabold mb-0.5">Your Itinerary</div>
-          <h3 className="text-2xl md:text-3xl font-black text-slate-800 leading-tight">
+          <div className="text-[15px] uppercase tracking-widest text-slate-400 font-extrabold mb-0.5">Your Itinerary</div>
+          <h3 className="text-3xl md:text-4xl font-black text-slate-800 leading-tight">
             {cleanTitle || 'Travel Itinerary'}
           </h3>
         </div>
@@ -288,13 +288,13 @@ const ItineraryTimeline = ({ text, isUser }) => {
       {currentDayData && (
         <div className="flex flex-col gap-6 bg-slate-50/40 border border-slate-100/50 rounded-2xl p-6 transition-all duration-200">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h4 className="font-extrabold text-slate-800 text-[21px] md:text-[22px]">
+            <h4 className="font-extrabold text-slate-800 text-[23px] md:text-[24px]">
               {currentDayData.title}
             </h4>
           </div>
 
           {currentDayData.summary && (
-            <p className="text-[19px] md:text-[20px] text-slate-600 leading-relaxed italic border-l-2 border-slate-200 pl-3">
+            <p className="text-[21px] md:text-[22px] text-slate-600 leading-relaxed italic border-l-2 border-slate-200 pl-3">
               {currentDayData.summary.replace(/\*\*/g, '')}
             </p>
           )}
@@ -309,7 +309,7 @@ const ItineraryTimeline = ({ text, isUser }) => {
                 <div key={aIdx} className="relative flex flex-col items-start gap-1 group">
                   <div className="absolute -left-[31.5px] top-2.5 w-[10px] h-[10px] rounded-full bg-slate-300 border-2 border-white shadow-sm transition-transform duration-200 group-hover:scale-125"></div>
                   
-                  <p className="text-[19px] md:text-[20px] text-slate-600 leading-relaxed">
+                  <p className="text-[21px] md:text-[22px] text-slate-600 leading-relaxed">
                     {renderTextWithLinksOnly(cleanAct, isUser)}
                   </p>
                 </div>
@@ -349,14 +349,14 @@ const ItineraryTimeline = ({ text, isUser }) => {
             
             return (
               <div key={sIdx} className={`p-5 rounded-2xl border ${bgClass} flex flex-col gap-3 shadow-sm`}>
-                <h5 className={`font-black text-[18px] md:text-[19px] ${titleClass} flex items-center gap-1.5`}>
+                <h5 className={`font-black text-[20px] md:text-[21px] ${titleClass} flex items-center gap-1.5`}>
                   <span>{icon}</span> {section}
                 </h5>
                 <ul className="flex flex-col gap-2">
                   {items.map((item, iIdx) => {
                     const cleanItem = item.replace(/\*\*/g, '');
                     return (
-                      <li key={iIdx} className="text-slate-600 text-[17px] md:text-[18px] leading-relaxed flex items-start gap-2">
+                      <li key={iIdx} className="text-slate-600 text-[19px] md:text-[20px] leading-relaxed flex items-start gap-2">
                         <span className="select-none text-slate-400">•</span>
                         <span className="flex-1">
                           {renderTextWithLinksOnly(cleanItem, isUser)}
@@ -392,7 +392,7 @@ const MessageBubble = ({ message, onQuickReply, onOptionSelect }) => {
           <ItineraryTimeline text={message.text} isUser={isUser} />
         ) : (
           <div 
-            className={`p-5 shadow-sm text-[17px] md:text-[18px] w-fit ${
+            className={`p-5 shadow-sm text-[19px] md:text-[20px] w-fit ${
               isUser 
                 ? 'bg-brand text-white rounded-3xl rounded-tr-sm' 
                 : 'bg-white text-slate-700 rounded-3xl rounded-tl-sm border border-slate-100'
@@ -451,7 +451,7 @@ const MessageBubble = ({ message, onQuickReply, onOptionSelect }) => {
               <button 
                 key={i} 
                 onClick={() => onQuickReply && onQuickReply(reply)}
-                className="px-6 py-3 bg-slate-50 border border-slate-200 text-slate-600 hover:bg-indigo-50/50 hover:border-indigo-200 hover:text-indigo-600 rounded-full text-[16px] md:text-[17px] font-semibold shadow-sm transform hover:-translate-y-0.5 active:translate-y-0 active:scale-95 transition-all duration-150"
+                className="px-6 py-3 bg-slate-50 border border-slate-200 text-slate-600 hover:bg-indigo-50/50 hover:border-indigo-200 hover:text-indigo-600 rounded-full text-[18px] md:text-[19px] font-semibold shadow-sm transform hover:-translate-y-0.5 active:translate-y-0 active:scale-95 transition-all duration-150"
               >
                 {reply}
               </button>

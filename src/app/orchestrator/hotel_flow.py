@@ -168,6 +168,12 @@ def handle_hotel_clarification(step: str, state: Dict[str, Any]) -> Dict[str, An
         replies = ["Payment Done"]
         options = [{"type": "action_button", "label": "Proceed to Booking", "url": link}]
         
+    elif step == "hotel_confirm_change":
+        old_hotel = state.get("hotel_ticket", {}).get("hotel_name", "your booked hotel")
+        new_hotel = state.get("temp_new_hotel", {}).get("name", "the new hotel")
+        msg = f"You already have a confirmed booking at **{old_hotel}**. Would you like to cancel it and book **{new_hotel}** instead?"
+        replies = ["Yes, cancel and book new", "No, keep existing"]
+        
     elif step == "hotel_booking_confirmed":
         pnr = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
         price_str = selected_hotel.get("price", selected_hotel.get("price_per_night", "₹2,250"))

@@ -151,6 +151,38 @@ Ensure you follow the strict formatting and rules. Do not hallucinate fields.
 
     _DECLINE_MARKER = "I'm sorry, I can only assist"
 
+    def filter_options_for_query(options: list, query: str) -> list:
+        if not options or not query:
+            return options
+        q = query.lower()
+        
+        # 1. Index checks
+        if "first" in q or "option 1" in q or "1st" in q:
+            return [options[0]] if len(options) >= 1 else options
+        if "second" in q or "option 2" in q or "2nd" in q:
+            return [options[1]] if len(options) >= 2 else options
+        if "third" in q or "option 3" in q or "3rd" in q:
+            return [options[2]] if len(options) >= 3 else options
+            
+        # 2. Price sorting checks
+        if "cheapest" in q or "lowest" in q or "affordable" in q or "budget" in q:
+            def get_price(opt):
+                p_str = opt.get("price") or opt.get("price_per_night") or "999999"
+                digits = "".join(filter(str.isdigit, p_str))
+                return int(digits) if digits else 999999
+            return [min(options, key=get_price)]
+            
+        # 3. Brand name checks (e.g. airline or hotel name matching)
+        matched = []
+        for opt in options:
+            name = opt.get("airline_name", opt.get("airline", opt.get("name", "")))
+            if name and name.lower() in q:
+                matched.append(opt)
+        if matched:
+            return matched
+            
+        return options
+
     def make_response(res_dict):
         if interruption_answer:
             answer_text = interruption_answer.strip()
@@ -160,14 +192,13 @@ Ensure you follow the strict formatting and rules. Do not hallucinate fields.
             
             # Message 2 (followup message) is a contextual reminder of the booking step
             reminder = get_contextual_booking_reminder(step, state)
-            if not reminder:
-                reminder = res_dict.get("final_response") or ""
-                
-            res_dict["followup_message"] = reminder
-            res_dict["followup_quick_replies"] = res_dict.get("quick_replies", [])
-            
-            # Since followup_message is present, clear main bubble's quick replies
-            res_dict["quick_replies"] = []
+            if reminder:
+                res_dict["followup_message"] = reminder
+                res_dict["followup_quick_replies"] = res_dict.get("quick_replies", [])
+                res_dict["quick_replies"] = []
+            else:
+                res_dict["followup_message"] = None
+                res_dict["followup_quick_replies"] = []
             
             # Special case: identified option in flight/hotel selection
             if identified_index is not None and step in ["flight_selecting", "hotel_selecting"] and not answer_text.startswith(_DECLINE_MARKER):
@@ -179,7 +210,8 @@ Ensure you follow the strict formatting and rules. Do not hallucinate fields.
                     res_dict["options_to_show"] = [single_option]
                     res_dict["followup_quick_replies"] = ["Proceed with this option", "Select another one"]
             elif step in ["flight_selecting", "hotel_selecting"]:
-                res_dict["options_to_show"] = res_dict.get("options_to_show") or state.get("options_to_show")
+                orig_opts = res_dict.get("options_to_show") or state.get("options_to_show") or []
+                res_dict["options_to_show"] = filter_options_for_query(orig_opts, state["messages"][-1].content)
                 
         res_dict["interruption_question"] = None
         res_dict["clarification_repeats"] = clarification_repeats
@@ -212,7 +244,7 @@ Guidelines:
         res_data = handle_flight_clarification(step, state)
     elif step and (step.startswith("hotel_") or step == "hotel_booking_confirmed" or (step == "awaiting_payment" and state.get("selected_hotel", {}).get("name"))):
         res_data = handle_hotel_clarification(step, state)
-    elif step and step.startswith("itinerary_"):
+    elif step and (step.startswith("itinerary_") or step == "plan_itinerary"):
         res_data = handle_itinerary_clarification(step, state)
     else:
         res_data = {"final_response": msg, "quick_replies": replies, "options_to_show": options}

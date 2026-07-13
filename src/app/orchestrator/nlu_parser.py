@@ -201,12 +201,35 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     if result.limit: 
         flight_params["limit"] = result.limit
     
-    if result.hotel_city and (not hotel_params.get("city") or step == "hotel_awaiting_city"): 
+    if result.hotel_city and (not hotel_params.get("city") or step == "hotel_awaiting_city" or step.startswith("hotel_")): 
         hotel_params["city"] = result.hotel_city
-    if result.check_in_date and (not hotel_params.get("check_in_date") or step == "hotel_awaiting_check_in"): 
-        hotel_params["check_in_date"] = result.check_in_date
-    if result.check_out_date and (not hotel_params.get("check_out_date") or step == "hotel_awaiting_check_out"): 
-        hotel_params["check_out_date"] = result.check_out_date
+        if step.startswith("hotel_") and step not in ["hotel_awaiting_city", "hotel_awaiting_check_in", "hotel_awaiting_check_out"]:
+            step = "hotel_ready_to_search"
+            
+    if result.check_in_date and (not hotel_params.get("check_in_date") or step == "hotel_awaiting_check_in" or step.startswith("hotel_")):
+        try:
+            datetime.strptime(result.check_in_date, "%Y-%m-%d")
+            hotel_params["check_in_date"] = result.check_in_date
+            if step.startswith("hotel_") and step not in ["hotel_awaiting_check_in", "hotel_awaiting_check_out"]:
+                step = "hotel_ready_to_search"
+        except ValueError:
+            pass
+
+    if result.check_out_date and (not hotel_params.get("check_out_date") or step == "hotel_awaiting_check_out" or step.startswith("hotel_")):
+        try:
+            dt_out = datetime.strptime(result.check_out_date, "%Y-%m-%d")
+            c_in = hotel_params.get("check_in_date")
+            valid = True
+            if c_in:
+                dt_in = datetime.strptime(c_in, "%Y-%m-%d")
+                if dt_out <= dt_in:
+                    valid = False
+            if valid:
+                hotel_params["check_out_date"] = result.check_out_date
+                if step.startswith("hotel_") and step not in ["hotel_awaiting_check_in", "hotel_awaiting_check_out"]:
+                    step = "hotel_ready_to_search"
+        except ValueError:
+            pass
     
     # Only accept departure_date when we are at a flight detail-gathering step or at the start.
     # Prevents pre-filling from initial messages only if they are not flight intents, but we allow them now.
@@ -231,8 +254,23 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
     step = state.get("current_step", "start")
     incoming_step = step
     
+    # Override for hotel suggestions requests
+    suggest_keywords = ["suggest", "recommend", "hostel", "hotel", "places to stay", "accommodation", "where to stay", "find me a stay"]
+    is_suggest_query = any(k in msg_text_lower for k in suggest_keywords)
+    target_city = result.hotel_city or result.destination or (flight_params.get("destination") if is_suggest_query else None)
+    
+    if is_suggest_query and target_city and not is_gathering_details and not any(w in msg_text_lower for w in ["flight", "plane", "ticket"]):
+        result.intent = "book_hotel"
+        hotel_params["city"] = target_city
+        today = datetime.now()
+        hotel_params["check_in_date"] = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+        hotel_params["check_out_date"] = (today + timedelta(days=8)).strftime("%Y-%m-%d")
+        hotel_params["rooms"] = "1 Room"
+        hotel_params["guests"] = "1 Adult"
+        step = "hotel_ready_to_search"
+    
     _itinerary_steps = {"itinerary_awaiting_city", "itinerary_awaiting_start_date", "itinerary_awaiting_days", "plan_itinerary"}
-    if any(w in msg_text_lower for w in ["plan an itinerary", "plan itinerary", "itinerary plan", "itinerary"]) and step not in _itinerary_steps:
+    if any(w in msg_text_lower for w in ["plan an itinerary", "plan itinerary", "itinerary plan", "itinerary", "itineary", "plan an itineary", "plan itineary", "itineary plan"]) and step not in _itinerary_steps:
         result.intent = "plan_itinerary"
         pending_clarification = None
         days_match = re.search(r"\b(\d+)\s*day", msg_text_lower)
@@ -441,26 +479,34 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             step = "awaiting_passenger_count"
         
     elif step != "verify_passenger_count" and result.intent == "select_hotel" and not step.startswith("hotel_awaiting_") and step != "hotel_summary":
-        is_button_select_hotel = user_msg_text.startswith("I would like to select hotel ")
-        pax = passengers_details[0] if passengers_details else (passenger_details or {})
-        if pax.get("name") and not selected_hotel.get("guest_name"):
-            selected_hotel["guest_name"] = pax.get("name")
-        if pax.get("email") and not selected_hotel.get("guest_email"):
-            selected_hotel["guest_email"] = pax.get("email")
-        if pax.get("contact") and not selected_hotel.get("guest_phone"):
-            selected_hotel["guest_phone"] = pax.get("contact")
-
-        if not is_button_select_hotel and result.selected_option_index is not None and len(options_to_show) > 1:
-            identified_opt = options_to_show[result.selected_option_index]
-            options_to_show = [identified_opt]
-            step = "hotel_selecting"
+        old_ticket = state.get("hotel_ticket")
+        if old_ticket and old_ticket.get("hotel_name"):
+            # Save the new hotel choice temporarily
+            state["temp_new_hotel"] = selected_hotel.copy()
+            # Restore the selected_hotel back to the old one for now
+            selected_hotel = state.get("selected_hotel", {}).copy()
+            step = "hotel_confirm_change"
         else:
-            if not selected_hotel.get("guest_name"): step = "hotel_awaiting_guest_name"
-            elif not selected_hotel.get("guest_email"): step = "hotel_awaiting_guest_email"
-            elif not selected_hotel.get("guest_phone"): step = "hotel_awaiting_guest_phone"
-            elif "special_requests" not in selected_hotel: step = "hotel_awaiting_special_requests"
-            elif "arrival_time" not in selected_hotel: step = "hotel_awaiting_arrival_time"
-            else: step = "hotel_summary"
+            is_button_select_hotel = user_msg_text.startswith("I would like to select hotel ")
+            pax = passengers_details[0] if passengers_details else (passenger_details or {})
+            if pax.get("name") and not selected_hotel.get("guest_name"):
+                selected_hotel["guest_name"] = pax.get("name")
+            if pax.get("email") and not selected_hotel.get("guest_email"):
+                selected_hotel["guest_email"] = pax.get("email")
+            if pax.get("contact") and not selected_hotel.get("guest_phone"):
+                selected_hotel["guest_phone"] = pax.get("contact")
+
+            if not is_button_select_hotel and result.selected_option_index is not None and len(options_to_show) > 1:
+                identified_opt = options_to_show[result.selected_option_index]
+                options_to_show = [identified_opt]
+                step = "hotel_selecting"
+            else:
+                if not selected_hotel.get("guest_name"): step = "hotel_awaiting_guest_name"
+                elif not selected_hotel.get("guest_email"): step = "hotel_awaiting_guest_email"
+                elif not selected_hotel.get("guest_phone"): step = "hotel_awaiting_guest_phone"
+                elif "special_requests" not in selected_hotel: step = "hotel_awaiting_special_requests"
+                elif "arrival_time" not in selected_hotel: step = "hotel_awaiting_arrival_time"
+                else: step = "hotel_summary"
             
     elif (result.intent == "provide_passenger_count" and step in ["awaiting_passenger_count", "start", "verify_passenger_count"]) or (step == "awaiting_passenger_count" and result.intent != "general_qa"):
         adults = result.adults_count or 1
@@ -557,7 +603,36 @@ def parse_intent(state: Dict[str, Any]) -> Dict[str, Any]:
             step = "hotel_booking_confirmed"
         else:
             step = "booking_confirmed"
+    elif step == "hotel_confirm_change":
+        if is_confirmation or "yes" in msg_text_lower:
+            old_ticket = state.get("hotel_ticket") or {}
+            selected_hotel = state.get("temp_new_hotel", {}).copy()
             
+            # Auto-populate guest details from the old ticket
+            selected_hotel["guest_name"] = old_ticket.get("guest_name") or selected_hotel.get("guest_name")
+            selected_hotel["guest_email"] = old_ticket.get("guest_email") or selected_hotel.get("guest_email")
+            selected_hotel["guest_phone"] = old_ticket.get("guest_phone") or selected_hotel.get("guest_phone")
+            selected_hotel["special_requests"] = old_ticket.get("special_requests") or selected_hotel.get("special_requests", "None")
+            selected_hotel["arrival_time"] = old_ticket.get("arrival_time") or selected_hotel.get("arrival_time", "None")
+            
+            # Reset email send flag so confirmation is sent for the new booking
+            state["hotel_email_sent"] = False
+            state["ticket"] = None
+            state["hotel_ticket"] = None
+            state["temp_new_hotel"] = None
+            
+            # Transition directly to hotel summary checkout
+            step = "hotel_summary"
+            pending_clarification = None
+        else:
+            # Revert change: clean up temp variables and keep existing confirmed booking
+            state["temp_new_hotel"] = None
+            old_ticket = state.get("hotel_ticket") or {}
+            state["ticket"] = old_ticket
+            selected_hotel = state.get("selected_hotel", {}).copy()
+            step = "start"
+            pending_clarification = None
+
     elif step.startswith("hotel_"):
         if step in ("hotel_awaiting_budget", "hotel_awaiting_custom_budget") and ("budget" in msg_text_lower or any(b in user_msg_text for b in ["₹", "Rs", "budget"])):
             matched = False

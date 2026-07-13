@@ -87,6 +87,7 @@ async def chat_endpoint(request: ChatRequest):
             ticket = new_state.get("ticket") or {}
             asyncio.create_task(email_service.send_booking_confirmation(primary_email, ticket))
             new_state["hotel_email_sent"] = True
+            new_state["hotel_ticket"] = ticket
             
     final_resp = new_state.get("final_response", "I encountered an error processing that.")
     # Append bot's response to the context

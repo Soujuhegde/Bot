@@ -2,6 +2,16 @@ import React from 'react';
 import { Download } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
+// Helper to extract 3-letter IATA code
+const getIataCode = (city, fullAirport) => {
+  if (city && city.length === 3) return city.toUpperCase();
+  if (fullAirport) {
+    const match = fullAirport.match(/\(([A-Z]{3})\)/);
+    if (match) return match[1];
+  }
+  return (city || 'N/A').substring(0, 3).toUpperCase();
+};
+
 // Single boarding pass for one passenger
 const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => {
   const ticketRef = React.useRef(null);
@@ -143,21 +153,21 @@ const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => 
       </div>
 
       {/* Right Section (Blue area) */}
-      <div className="w-full md:w-80 p-6 md:p-8 text-white flex flex-col relative rounded-r-2xl border-t md:border-t-0 md:border-l-0 border-white/20 border-dashed mt-4 md:mt-0">
-        <h3 className="text-xl font-bold tracking-widest uppercase mb-6 text-center">Boarding Pass</h3>
+      <div className="w-full md:w-80 p-5 md:p-6 text-white flex flex-col relative rounded-r-2xl border-t md:border-t-0 md:border-l-0 border-white/20 border-dashed mt-4 md:mt-0">
+        <h3 className="text-xl font-bold tracking-widest uppercase mb-6 text-center mt-8">Boarding Pass</h3>
 
         {/* Small White Route Box */}
         <div className="bg-white text-[#204996] rounded-xl p-3 flex justify-between items-center mb-8 w-full shadow-inner">
-          <div className="text-center">
+          <div className="text-center flex-1">
             <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">From</p>
-            <p className="text-2xl font-bold">{ticket.origin}</p>
+            <p className="text-2xl font-bold">{getIataCode(ticket.origin, ticket.origin_full)}</p>
           </div>
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 transform rotate-90 text-[#4a81e3]">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 transform rotate-90 text-[#4a81e3] mx-2 flex-shrink-0">
             <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
           </svg>
-          <div className="text-center">
+          <div className="text-center flex-1">
             <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">To</p>
-            <p className="text-2xl font-bold">{ticket.destination}</p>
+            <p className="text-2xl font-bold">{getIataCode(ticket.destination, ticket.destination_full)}</p>
           </div>
         </div>
 
@@ -165,24 +175,23 @@ const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => 
         <div className="grid grid-cols-2 gap-y-5 gap-x-2 text-sm w-full">
           <div className="col-span-2">
             <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Passenger Name</p>
-            <p className="font-semibold">{passengerName}</p>
+            <p className="font-semibold truncate">{passengerName}</p>
           </div>
-          <div className="col-span-2 flex justify-between">
-            <div>
-              <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Gate</p>
-              <p className="font-semibold">{ticket.gate}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Flight</p>
-              <p className="font-semibold">{ticket.flight_numbers}</p>
-            </div>
+          
+          <div>
+            <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Gate</p>
+            <p className="font-semibold">{ticket.gate}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Flight</p>
+            <p className="font-semibold">{ticket.flight_numbers}</p>
           </div>
 
           <div>
             <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Date</p>
             <p className="font-semibold">{displayDate}</p>
           </div>
-          <div>
+          <div className="text-right">
             <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Boarding Time</p>
             <p className="font-semibold">{ticket.departure_time}</p>
           </div>
@@ -191,7 +200,7 @@ const SingleBoardingPass = ({ ticket, passengerName, passengerIndex, seat }) => 
             <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Departed</p>
             <p className="font-semibold">{ticket.departure_time}</p>
           </div>
-          <div>
+          <div className="text-right">
             <p className="text-[9px] text-white/60 uppercase tracking-widest mb-0.5">Arrived</p>
             <p className="font-semibold">{ticket.arrival_time}</p>
           </div>

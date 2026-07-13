@@ -36,7 +36,7 @@ const ChatInput = ({ onSendMessage, isLoading }) => {
             ref={textareaRef}
             rows={1}
             placeholder="Book a flight to Paris next week..."
-            className="w-full max-h-48 py-2 pl-3 pr-12 bg-transparent border-0 resize-none focus:ring-0 text-gray-800 text-base"
+            className="w-full max-h-48 py-2 pl-3 pr-12 bg-transparent border-0 resize-none focus:ring-0 text-gray-800 text-lg"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
