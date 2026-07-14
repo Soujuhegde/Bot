@@ -12,6 +12,7 @@ It is designed with a decoupled architecture utilizing a **FastAPI + LangGraph**
 *   **Live Search Integrations**:
     *   **Flights**: Fetches real-time flight options, prices, classes, and schedules via the SerpAPI Google Flights engine.
     *   **Hotels**: Fetches real-time accommodation details, prices per night, guest ratings, and pictures via the SerpAPI Google Hotels engine.
+*   **SerpAPI Disk Caching**: Hashes and caches incoming query parameters (with key normalization, filtering out session IDs/API keys/timestamps) to a local cache under `.cache/serpapi/` with a default Time-To-Live (TTL) of 1 hour. This avoids duplicate queries, cuts response times, and saves API quota.
 *   **Dynamic Suggestion Cards**: Instantly intercepts accommodation suggestion requests (e.g., *"suggest hostels in Goa"*) and launches a card search with next-week stay defaults on screen.
 *   **Booking Changes & Details Cloning**: Detects attempts to select a new hotel when the user already has a confirmed booking, prompting them to cancel the old one and automatically copying over previous parameters (dates, guests, name, contact) to bypass repetitive entry.
 *   **Heuristic Option Filtering**: Filters active flight or hotel options to show only the single target card in response to user questions (e.g. *"which is the cheapest flight?"* or *"show the IndiGo flight"*).
@@ -21,7 +22,8 @@ It is designed with a decoupled architecture utilizing a **FastAPI + LangGraph**
 *   **Conversational Guardrails & Safety**:
     *   **Interruption Handling**: Answers travel questions in the middle of a booking, and gently redirects back to the current booking step.
     *   **Off-Topic Filter**: Hard-refuses completely unrelated queries (e.g. general food recipes, coding, math) to keep the chat context focused on travel.
-    *   **Input Validation**: Automatically rejects past travel dates and invalid email formats, returning custom verification prompts.
+    *   **Input / Relative Date Validation**: Automatically rejects past travel dates and invalid email formats, returning custom verification prompts. Resolves relative checkout inputs (e.g., *"tomorrow"*, *"3 nights"*, *"1 week"*) dynamically against the check-in date.
+    *   **Accurate Price & Currency Cleansing**: Parses and calculates total prices containing decimal cents and currency codes (e.g., `₹2,916.00`) accurately across multiple rooms or nights.
 
 ---
 
@@ -35,6 +37,7 @@ It is designed with a decoupled architecture utilizing a **FastAPI + LangGraph**
 *   **Pydantic**: Structural model validation schemas.
 *   **SerpAPI**: Google Flights & Google Hotels engines for live data.
 *   **Pickle**: Local session file caching (`sessions.pkl`).
+*   **Pytest**: Unit and integration test suite.
 
 ### Frontend
 *   **React (v18)**: Component-based user interface.
@@ -53,16 +56,18 @@ travel-chatbot/
 ├── frontend/
 │   └── react-app/
 │       ├── src/
-│       │   ├── components/       # UI parts (ChatInterface, Ticket, Cards, Bubbles)
+│       │   ├── components/       # UI components (ChatInterface, Ticket, Cards, Bubbles)
+│       │   ├── utils/            # Frontend helper utilities
 │       │   ├── main.jsx          # React app mounter
-│       │   └── App.jsx           # Main page structure mounter
+│       │   ├── App.jsx           # Main page structure mounter
+│       │   └── index.css         # Main stylesheet with Tailwind directives
 │       ├── tailwind.config.js    # Design system configurations
 │       └── package.json          # Node dependencies
 ├── src/
 │   ├── app/
 │   │   ├── agents/
-│   │   │   ├── flight_agent.py   # Resolves IATA codes and requests SerpAPI flights
-│   │   │   └── hotel_agent.py    # Requests SerpAPI hotels with Mock fallback
+│   │   │   ├── flight_agent.py   # Resolves IATA codes and requests SerpAPI flights (cache-enabled)
+│   │   │   └── hotel_agent.py    # Requests SerpAPI hotels with Mock fallback (cache-enabled)
 │   │   ├── api/
 │   │   │   └── routes.py         # /api/chat FastAPI endpoint and session cache loader
 │   │   ├── db/
@@ -79,10 +84,13 @@ travel-chatbot/
 │   │   ├── services/
 │   │   │   └── email_service.py  # Dispatches transactional booking confirmations (Brevo)
 │   │   ├── utils/
+│   │   │   ├── cache.py          # SerpAPI caching engine (TTL/parameter normalization)
 │   │   │   └── mock_data.py      # Fallback database listings
 │   │   └── main.py               # Main entrance server script
 │   └── tests/
-│       └── test_chat.py          # Integration test suite for chat flows
+│       ├── test_cache.py         # Unit tests for TTL and cache key normalization
+│       ├── test_chat.py          # Integration test suite for chat flows
+│       └── test_hotel_fixes.py   # Unit tests for relative checkout and price parsing
 ├── .env.example                  # Template configuration environment
 ├── requirements.txt              # Backend packages
 └── README.md                     # Documentation
@@ -148,9 +156,20 @@ travel-chatbot/
 
 ---
 
+### 3. Running the Test Suite
+The repository includes unit and integration tests (using `pytest`) to verify agent logic, caching functionality, and date/price parsing.
+1.  Activate your virtual environment.
+2.  From the `travel-chatbot` root directory, run:
+    ```bash
+    python -m pytest
+    ```
+
+---
+
 ## 🔒 Guardrails and Validation Details
 
 1.  **Date Constraint Checks**: Checks whether departure or check-in dates are in the past. Invalidates and requests correction.
 2.  **Schema Consistency**: Uses Pydantic to ensure all inputs match type limits, avoiding system crashes from malformed payloads.
 3.  **Out-of-Scope Shield**: Categorizes questions. Casual chats get friendly answers, travel queries are answered concisely, and non-travel prompts (e.g. code/math) are blocked.
 4.  **Data Fallbacks**: Keeps hotel reservations active by retrieving local data if external APIs exceed standard timeout limits.
+5.  **SerpAPI Rate Limiting**: The file-caching layer caches external API responses to avoid hitting request rate limits or consuming excessive quota.
